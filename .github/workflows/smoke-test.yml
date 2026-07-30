@@ -20,7 +20,6 @@ jobs:
       - name: Syntax check (all modules)
         run: |
           python -m py_compile whiteboard-to-app/server.py whiteboard-to-app/azure_iac.py
-          python -m py_compile time-machine/server.py
 
       - name: Smoke test — Whiteboard → App
         run: |
@@ -33,14 +32,4 @@ jobs:
           echo; echo "parse:";   curl -sf "localhost:8012/api/parse?sample=microservices" > /tmp/g.json
           echo "generate:";      curl -sf -X POST localhost:8012/api/generate -d @/tmp/g.json | python3 -c "import sys,json; d=json.load(sys.stdin); assert 'kind: Deployment' in d['k8s']; print('k8s ok')"
           echo "deploy:";        curl -sf -X POST localhost:8012/api/deploy   -d @/tmp/g.json | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['status']=='running'; print('deploy ok')"
-          kill $SRV
-
-      - name: Smoke test — Time Machine
-        run: |
-          cd time-machine
-          PORT=8011 python3 server.py &
-          SRV=$!
-          sleep 2
-          curl -sf localhost:8011/api/incidents | python3 -c "import sys,json; assert len(json.load(sys.stdin))>=1; print('incidents ok')"
-          curl -sf "localhost:8011/api/replay?id=INC-4471" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['root_cause']['summary']; print('replay ok')"
           kill $SRV

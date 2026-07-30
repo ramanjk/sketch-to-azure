@@ -1,8 +1,8 @@
 # Demo scripts
 
-Two tight, 3-minute demos. Practice these verbatim.
+A tight, 3-minute demo. Practice this verbatim.
 
-## ✏️ Whiteboard → Running App (headline demo)
+## ✏️ Sketch → Azure (headline demo)
 
 **Setup:** `cd whiteboard-to-app && ./run-live.sh` — badge shows 🟢 live.
 Have your architecture diagram image ready.
@@ -25,15 +25,3 @@ Have your architecture diagram image ready.
 > is deployed for real so the loop is genuinely end-to-end.
 
 **Reset:** `./cleanup-demo.sh` between runs.
-
-## ⏱ Time Machine
-
-**Setup:** `cd time-machine && python3 server.py` → http://localhost:8011
-
-1. **(0:00)** "When prod breaks at 3am, you wish you could rewind time."
-2. **(0:20)** Paste `INC-4471`. Timeline animates the error spike and the bad
-   deploy `v2.3.1`.
-3. **(1:00)** Root cause appears with confidence % and the offending diff.
-4. **(1:40)** Click **Simulate fix** — a PR opens and the metrics graph goes
-   red → green.
-5. **(2:30)** "Root cause to verified fix, in one flow."

@@ -3,7 +3,7 @@
 Thanks for your interest! This is a Microsoft Hackathon project.
 
 ## Principles
-- **Zero dependencies.** Both apps use only the Python standard library. Please
+- **Zero dependencies.** The app uses only the Python standard library. Please
   don't add `pip`/`requirements.txt` — keep it runnable with a bare `python3`.
 - **Demo-safe.** Anything that touches the cloud must degrade gracefully to a
   mock so the demo never breaks on stage.
@@ -13,7 +13,7 @@ Thanks for your interest! This is a Microsoft Hackathon project.
 ## Dev loop
 ```bash
 # syntax
-python -m py_compile whiteboard-to-app/server.py whiteboard-to-app/azure_iac.py time-machine/server.py
+python -m py_compile whiteboard-to-app/server.py whiteboard-to-app/azure_iac.py
 
 # run + smoke test (same as CI)
 cd whiteboard-to-app && python3 server.py &
@@ -27,5 +27,5 @@ curl -s localhost:8012/api/samples
   and verify it passes `az bicep build`.
 
 ## Pull requests
-CI (`.github/workflows/smoke-test.yml`) must pass: syntax check + both server
-smoke tests.
+CI (`.github/workflows/smoke-test.yml`) must pass: syntax check + the server
+smoke test.
