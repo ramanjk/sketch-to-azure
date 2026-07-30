@@ -1,0 +1,67 @@
+{
+  "INC-4471": {
+    "id": "INC-4471",
+    "title": "Checkout API latency spike & 5xx surge",
+    "service": "checkout-api",
+    "severity": "SEV2",
+    "started_at": "03:12",
+    "timeline": [
+      {"t": "03:05", "kind": "deploy",  "label": "Deploy v2.3.1 rolled out (connection-pool refactor)", "signal": "info"},
+      {"t": "03:08", "kind": "metric",  "label": "DB active connections climbing: 40 \u2192 95 / 100", "signal": "warn"},
+      {"t": "03:12", "kind": "metric",  "label": "HTTP 5xx rate jumps 0.2% \u2192 11.4%", "signal": "error"},
+      {"t": "03:12", "kind": "log",     "label": "\"FATAL: remaining connection slots are reserved\"", "signal": "error"},
+      {"t": "03:14", "kind": "metric",  "label": "p99 latency 180ms \u2192 4200ms", "signal": "error"},
+      {"t": "03:15", "kind": "alert",   "label": "PagerDuty: checkout-api SEV2 paged", "signal": "error"}
+    ],
+    "root_cause": {
+      "summary": "Connection-pool exhaustion introduced in deploy v2.3.1.",
+      "detail": "v2.3.1 changed the pool from per-request lease-and-return to per-handler, so pooled connections were never released under load. Active connections saturated the Postgres max (100), causing new queries to fail with 5xx and latency to balloon.",
+      "confidence": 0.92,
+      "offending_deploy": "v2.3.1",
+      "diff": "- pool = get_pool()\n- with pool.lease() as conn:\n-     return handler(conn)\n+ conn = pool.acquire()   # never released on the hot path\n+ return handler(conn)"
+    },
+    "fix": {
+      "kind": "rollback",
+      "label": "Roll back checkout-api to v2.3.0 and restore lease-and-return pooling",
+      "pr_title": "fix(checkout-api): restore connection lease/return to stop pool exhaustion",
+      "manifest": "kubectl -n sandbox set image deploy/checkout-api app=checkout-api:v2.3.0"
+    },
+    "metrics": {
+      "label": "HTTP 5xx rate (%)",
+      "before": [0.2, 0.2, 0.3, 4.1, 9.8, 11.4, 11.2, 10.9],
+      "after":  [11.4, 8.0, 3.2, 0.9, 0.3, 0.2, 0.2, 0.2]
+    }
+  },
+  "INC-5090": {
+    "id": "INC-5090",
+    "title": "Recommendations service OOMKilled loop",
+    "service": "reco-svc",
+    "severity": "SEV3",
+    "started_at": "14:41",
+    "timeline": [
+      {"t": "14:30", "kind": "deploy",  "label": "Deploy v1.9.0 (new embedding cache) rolled out", "signal": "info"},
+      {"t": "14:38", "kind": "metric",  "label": "Container memory 512MB \u2192 1.9GB (limit 2GB)", "signal": "warn"},
+      {"t": "14:41", "kind": "log",     "label": "\"OOMKilled\" \u2014 pod restarts begin", "signal": "error"},
+      {"t": "14:43", "kind": "metric",  "label": "Restart count climbing: CrashLoopBackOff", "signal": "error"},
+      {"t": "14:45", "kind": "alert",   "label": "Prometheus alert: reco-svc availability < 80%", "signal": "error"}
+    ],
+    "root_cause": {
+      "summary": "Unbounded in-memory embedding cache added in v1.9.0.",
+      "detail": "The new embedding cache had no eviction policy or size cap, so memory grew until the 2GB limit triggered repeated OOMKills and a crash loop.",
+      "confidence": 0.87,
+      "offending_deploy": "v1.9.0",
+      "diff": "- # (no cache)\n+ CACHE = {}          # unbounded, no TTL / max size\n+ CACHE[key] = embed(text)"
+    },
+    "fix": {
+      "kind": "config",
+      "label": "Cap cache at 10k entries with LRU eviction + raise limit to 3Gi",
+      "pr_title": "fix(reco-svc): bound embedding cache with LRU to stop OOMKill loop",
+      "manifest": "helm upgrade reco-svc ./chart --set cache.maxEntries=10000 --set resources.limits.memory=3Gi"
+    },
+    "metrics": {
+      "label": "Container memory (GB)",
+      "before": [0.5, 0.8, 1.3, 1.9, 2.0, 2.0, 2.0, 2.0],
+      "after":  [2.0, 1.6, 1.1, 0.9, 0.8, 0.8, 0.8, 0.8]
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "webapp-basic": {
+    "id": "webapp-basic",
+    "name": "3-tier web app",
+    "sketch_ascii": "[ Browser ] --> [ API ] --> [ Postgres ]",
+    "nodes": [
+      {"id": "web", "type": "frontend", "label": "Browser / SPA"},
+      {"id": "api", "type": "api",      "label": "REST API"},
+      {"id": "db",  "type": "database", "label": "Postgres"}
+    ],
+    "edges": [["web","api"],["api","db"]]
+  },
+  "webapp-cache": {
+    "id": "webapp-cache",
+    "name": "3-tier web app + cache",
+    "sketch_ascii": "[ Browser ] --> [ API ] --> [ Postgres ]\n                          \\--> [ Redis ]",
+    "nodes": [
+      {"id": "web",   "type": "frontend", "label": "Browser / SPA"},
+      {"id": "api",   "type": "api",      "label": "REST API"},
+      {"id": "db",    "type": "database", "label": "Postgres"},
+      {"id": "cache", "type": "cache",    "label": "Redis"}
+    ],
+    "edges": [["web","api"],["api","db"],["api","cache"]]
+  },
+  "event-driven": {
+    "id": "event-driven",
+    "name": "Event-driven worker",
+    "sketch_ascii": "[ API ] --> [ Queue ] --> [ Worker ] --> [ Blob ]",
+    "nodes": [
+      {"id": "api",    "type": "api",     "label": "Ingest API"},
+      {"id": "queue",  "type": "queue",   "label": "Service Bus"},
+      {"id": "worker", "type": "worker",  "label": "Worker"},
+      {"id": "blob",   "type": "storage", "label": "Blob Storage"}
+    ],
+    "edges": [["api","queue"],["queue","worker"],["worker","blob"]]
+  },
+  "microservices": {
+    "id": "microservices",
+    "name": "Microservices behind a gateway",
+    "sketch_ascii": "[ Browser ] --> [ Gateway ] --> [ Orders ] --> [ Postgres ]\n                            \\--> [ Users ] --> [ Redis ]",
+    "nodes": [
+      {"id": "web",     "type": "frontend", "label": "Browser / SPA"},
+      {"id": "gateway", "type": "gateway",  "label": "API Gateway"},
+      {"id": "orders",  "type": "api",      "label": "Orders svc"},
+      {"id": "users",   "type": "api",      "label": "Users svc"},
+      {"id": "db",      "type": "database", "label": "Postgres"},
+      {"id": "cache",   "type": "cache",    "label": "Redis"}
+    ],
+    "edges": [["web","gateway"],["gateway","orders"],["gateway","users"],["orders","db"],["users","cache"]]
+  },
+  "static-site-cdn": {
+    "id": "static-site-cdn",
+    "name": "Static site + CDN + API",
+    "sketch_ascii": "[ Browser ] --> [ CDN ] --> [ Static Site ]\n                        \\--> [ API ] --> [ Cosmos DB ]",
+    "nodes": [
+      {"id": "web",    "type": "frontend",  "label": "Browser"},
+      {"id": "cdn",    "type": "cdn",       "label": "Front Door / CDN"},
+      {"id": "site",   "type": "staticsite","label": "Static Web App"},
+      {"id": "api",    "type": "api",       "label": "Functions API"},
+      {"id": "db",     "type": "database",  "label": "Cosmos DB"}
+    ],
+    "edges": [["web","cdn"],["cdn","site"],["cdn","api"],["api","db"]]
+  },
+  "aks-gpu": {
+    "id": "aks-gpu",
+    "name": "AKS GPU inference",
+    "sketch_ascii": "[ Browser ] --> [ Gateway ] --> [ Inference (GPU) ] --> [ Blob (models) ]",
+    "nodes": [
+      {"id": "web",     "type": "frontend", "label": "Client"},
+      {"id": "gateway", "type": "gateway",  "label": "AI Gateway"},
+      {"id": "infer",   "type": "gpu",      "label": "vLLM Inference (GPU)"},
+      {"id": "models",  "type": "storage",  "label": "Blob (model weights)"}
+    ],
+    "edges": [["web","gateway"],["gateway","infer"],["infer","models"]]
+  }
+}

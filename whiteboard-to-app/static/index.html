@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Whiteboard → Running App</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b22;--line:#2a3240;--txt:#e6edf3;--dim:#8b98a9;
+        --acc:#2f81f7;--ok:#3fb950;--node:#1f6feb;--acc2:#a371f7}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+  header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+  header h1{font-size:18px;margin:0}.tag{font-size:11px;color:var(--dim)}
+  .wrap{max-width:1040px;margin:0 auto;padding:24px}
+  .steps{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+  .step{font-size:12px;color:var(--dim);padding:4px 10px;border:1px solid var(--line);border-radius:20px}
+  .step.on{color:var(--txt);border-color:var(--acc);background:#132a4d}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  .card h3{margin:0 0 12px;font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.04em}
+  button{cursor:pointer;font:inherit;font-weight:600;border-radius:8px;border:1px solid var(--acc);background:var(--acc);color:#fff;padding:10px 14px}
+  button.ghost{background:var(--panel);border-color:var(--line);color:var(--txt);font-weight:500}
+  .samples{display:flex;gap:10px;flex-wrap:wrap}
+  .sample{flex:1;min-width:220px;cursor:pointer;border:1px solid var(--line);border-radius:10px;padding:12px;background:#0d1117}
+  .sample:hover{border-color:var(--acc)}
+  .sample pre{margin:6px 0 0;font-size:11px;color:var(--dim);white-space:pre-wrap}
+  .graph{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .node{padding:10px 14px;border-radius:10px;background:#132a4d;border:1px solid var(--node);
+        opacity:0;transform:scale(.9);animation:pop .3s forwards}
+  .node.database{background:#1d2a1f;border-color:var(--ok)}
+  .node.cache{background:#2a1f3d;border-color:var(--acc2)}
+  .node.queue,.node.storage{background:#2a2419;border-color:#d29922}
+  .node.gateway{background:#0f2b2b;border-color:#2bb5b5}
+  .node.cdn{background:#2b1f2b;border-color:#d16ba5}
+  .node.staticsite{background:#22262b;border-color:#7a8aa0}
+  .node.gpu{background:#3a1717;border-color:#ff5c72}
+  .node.appgateway,.node.waf{background:#0f2438;border-color:#3a8ee0}
+  .node.apim{background:#12223a;border-color:#5aa0ff}
+  .node.aks{background:#0d2436;border-color:#2f81f7}
+  .node.keyvault{background:#2a2a12;border-color:#e0c341}
+  .node.acr,.node.privateendpoint{background:#1a2436;border-color:#6ea8fe}
+  .node.appconfig,.node.managedidentity{background:#2a2419;border-color:#d29922}
+  .node.vm{background:#132a4d;border-color:#1f6feb}
+  .node.privatedns{background:#22262b;border-color:#7a8aa0}
+  @keyframes pop{to{opacity:1;transform:none}}
+  .arrow{color:var(--dim)}
+  .ntype{font-size:10px;color:var(--dim);text-transform:uppercase}
+  pre.iac{background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12px;max-height:260px}
+  .row{display:flex;gap:16px;flex-wrap:wrap}.row>.card{flex:1;min-width:320px}
+  .hide{display:none}
+  .urlbox{font-size:20px;font-weight:700}.urlbox a{color:var(--ok)}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  input[type=file]{color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <h1>✏️ Whiteboard → Running App</h1>
+  <span class="tag">sketch → parsed graph → IaC → live URL</span>
+</header>
+<div class="wrap">
+  <div class="steps">
+    <span class="step" id="s1">1 · Sketch</span>
+    <span class="step" id="s2">2 · Parsed graph</span>
+    <span class="step" id="s3">3 · Generated IaC</span>
+    <span class="step" id="s4">4 · Deployed</span>
+  </div>
+
+  <div class="card">
+    <h3>Start from a sketch</h3>
+    <div class="samples" id="samples"></div>
+    <div style="margin-top:12px;color:var(--dim)">…or upload a photo of your own whiteboard:
+      <input type="file" id="file" accept="image/*" onchange="uploadImg()"/>
+      <span class="tag" id="visionBadge">(checking vision…)</span>
+    </div>
+  </div>
+
+  <div id="graphCard" class="card hide">
+    <h3>Parsed architecture · <span id="gName"></span></h3>
+    <div class="graph" id="graph"></div>
+    <button style="margin-top:14px" onclick="generate()">Generate IaC →</button>
+  </div>
+
+  <div class="row" id="iacRow">
+    <div id="bicepCard" class="card hide">
+      <h3 id="bicepTitle">Azure infra (Bicep)</h3><pre class="iac" id="bicep"></pre>
+    </div>
+    <div id="k8sCard" class="card hide">
+      <h3>Kubernetes manifests</h3><pre class="iac" id="k8s"></pre>
+    </div>
+  </div>
+
+  <div id="deployCard" class="card hide">
+    <button onclick="deploy()" id="deployBtn">🚀 Deploy to sandbox</button>
+    <div id="deployStatus" style="margin-top:14px"></div>
+  </div>
+</div>
+<script>
+let graph=null;
+function on(id){document.getElementById(id).classList.add('on');}
+async function loadSamples(){
+  const r=await fetch('/api/samples');const s=await r.json();
+  document.getElementById('samples').innerHTML=s.map(x=>
+    `<div class="sample" onclick="pick('${x.id}')"><b>${x.name}</b><pre>${x.sketch_ascii}</pre></div>`).join('');
+}
+async function pick(id){
+  const r=await fetch('/api/parse?sample='+encodeURIComponent(id));graph=await r.json();renderGraph();
+}
+async function uploadImg(){
+  const f=document.getElementById('file').files[0];if(!f)return;
+  const buf=await f.arrayBuffer();
+  const r=await fetch('/api/parse-image',{method:'POST',body:buf});graph=await r.json();renderGraph();
+}
+function renderGraph(){
+  on('s1');on('s2');
+  document.getElementById('gName').textContent=graph.name;
+  const g=document.getElementById('graph');g.innerHTML='';
+  graph.nodes.forEach((n,i)=>{
+    if(i>0){const a=document.createElement('span');a.className='arrow';a.textContent='→';g.appendChild(a);}
+    const d=document.createElement('div');d.className='node '+n.type;d.style.animationDelay=(i*0.12)+'s';
+    d.innerHTML=`<span class="ntype">${n.type}</span><br>${n.label}`;g.appendChild(d);
+  });
+  document.getElementById('graphCard').classList.remove('hide');
+  document.getElementById('bicepCard').classList.add('hide');
+  document.getElementById('k8sCard').classList.add('hide');
+  document.getElementById('deployCard').classList.add('hide');
+}
+async function generate(){
+  const r=await fetch('/api/generate',{method:'POST',body:JSON.stringify(graph)});const iac=await r.json();
+  window._kind=iac.kind;
+  document.getElementById('bicep').textContent=iac.bicep;
+  document.getElementById('bicepCard').classList.remove('hide');
+  const isAzure=iac.kind==='azure-infra';
+  document.getElementById('bicepTitle').textContent=isAzure?'Azure infrastructure (Bicep)':'Azure infra (Bicep)';
+  if(isAzure){
+    document.getElementById('k8sCard').classList.add('hide');
+    document.getElementById('deployBtn').textContent='🧪 Validate & deploy (bicep build)';
+  }else{
+    document.getElementById('k8s').textContent=iac.k8s||'(no stateless services in this graph)';
+    document.getElementById('k8sCard').classList.remove('hide');
+    document.getElementById('deployBtn').textContent='🚀 Deploy to sandbox';
+  }
+  document.getElementById('deployCard').classList.remove('hide');
+  on('s3');
+}
+async function deploy(){
+  const st=document.getElementById('deployStatus');
+  document.getElementById('deployBtn').disabled=true;
+  const isAzure=window._kind==='azure-infra';
+  st.innerHTML='<span class="spin"></span> '+(isAzure
+    ?'compiling Bicep to ARM (az bicep build)…'
+    :'applying manifests to pre-warmed sandbox…');
+  const r=await fetch('/api/deploy',{method:'POST',body:JSON.stringify(graph)});const d=await r.json();
+  on('s4');
+  if(isAzure && d.validated){
+    let real='';
+    if(d.real_deploy && d.real_deploy.ok){
+      const r=d.real_deploy;
+      real=`<div style="margin-top:10px;padding:10px;border:1px solid var(--ok);border-radius:8px;background:#0d1f14">
+        <b style="color:var(--ok)">🌐 Really provisioned in Azure</b> · RG <code>${r.resource_group}</code>
+        <div style="color:var(--dim);margin-top:6px">
+          ${r.identityId?('• Managed Identity: <code>'+r.identityId.split('/').pop()+'</code><br>'):''}
+          ${r.keyVaultUri?('• Key Vault: <a href="'+r.keyVaultUri+'" target="_blank">'+r.keyVaultUri+'</a><br>'):''}
+          ${r.acrLoginServer?('• ACR: <code>'+r.acrLoginServer+'</code>'):''}
+        </div></div>`;
+    }else if(d.real_deploy){
+      real=`<div style="margin-top:10px;color:var(--acc2)">⚠️ Real deploy failed: <pre class="iac">${(d.real_deploy.error||'').replace(/</g,'&lt;')}</pre></div>`;
+    }
+    const verb=(d.real_deploy&&d.real_deploy.ok)?'validated + partially deployed':'validated';
+    st.innerHTML=`<div class="urlbox">✅ Bicep ${verb} — ${d.arm_resources} ARM resources compiled</div>
+      <div style="color:var(--dim)">${d.resources} diagram nodes · ${d.arm_bytes} bytes of ARM JSON</div>${real}
+      <div style="color:var(--dim);margin-top:6px">Heavy resources (App Gateway/APIM/AKS) are validate-only; the demo-safe subset (Identity/KV/ACR) is provisioned for real.</div>`;
+  }else if(isAzure){
+    st.innerHTML=`<div class="urlbox" style="color:var(--acc2)">⚠️ Bicep did not compile</div>
+      <pre class="iac">${(d.reason||'unknown error').replace(/</g,'&lt;')}</pre>`;
+  }else{
+    st.innerHTML=`<div class="urlbox">✅ Live: <a href="${d.url}" target="_blank">${d.url}</a></div>
+      <div style="color:var(--dim)">${d.resources} resources · status: ${d.status}</div>`;
+  }
+  document.getElementById('deployBtn').disabled=false;
+}
+loadSamples();
+async function loadConfig(){
+  try{
+    const r=await fetch('/api/config');const c=await r.json();
+    const b=document.getElementById('visionBadge');
+    if(c.vision==='live'){b.textContent='(🟢 live GPT-4o vision — parses real sketches)';b.style.color='var(--ok)';}
+    else{b.textContent='(🟡 mock vision — maps upload to a known pattern; set AZURE_OPENAI_* for live)';}
+  }catch(e){}
+}
+loadConfig();
+</script>
+</body>
+</html>
