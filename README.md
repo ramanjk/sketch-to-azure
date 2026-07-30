@@ -50,6 +50,13 @@ For **live GPT-4o vision + real Azure deploy**, see
 
 ## Architecture
 
+<p align="center">
+  <img src="docs/architecture.png" alt="Sketch → Azure architecture: capture → GPT-4o vision → Bicep generator → az bicep build validation → real safe-subset deploy" width="900">
+</p>
+
+<details>
+<summary>Text-only view</summary>
+
 ```
   ┌── image ──►  GPT-4o vision  ──►  {nodes, edges} graph
   │                                       │
@@ -60,6 +67,8 @@ For **live GPT-4o vision + real Azure deploy**, see
   └───────────┤                                             │
               └─ az deployment group create (deploy SAFE subset)
 ```
+
+</details>
 
 ## Tech
 
