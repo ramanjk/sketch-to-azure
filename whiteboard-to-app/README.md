@@ -2,6 +2,10 @@
 
 **Snap a photo of an architecture sketch → parsed graph → generated IaC → a live URL.**
 
+<p align="center">
+  <img src="../docs/demo.gif" alt="Whiteboard to Azure demo" width="720">
+</p>
+
 Hackathon scaffold. Pure Python **stdlib, zero dependencies**. Runs fully offline
 with a deterministic mock, **or with LIVE GPT-4o vision + real Bicep validation**
 when Azure is configured.

@@ -4,6 +4,15 @@
 > between *intent* and *running infrastructure*, built on Azure OpenAI + the
 > Azure CLI, with **zero Python dependencies** (pure stdlib).
 
+<p align="center">
+  <img src="docs/demo.gif" alt="Sketch → Azure: a photo of an architecture diagram becomes validated Bicep and real Azure resources" width="760">
+</p>
+
+<p align="center">
+  <b>▶ Prefer video?</b> <a href="docs/demo.mp4">Watch the 20-second MP4 walkthrough</a>
+  &nbsp;·&nbsp; photo → GPT-4o vision → Bicep → real deploy
+</p>
+
 | | Project | One-liner | Status |
 |---|---|---|---|
 | ✏️ | **[Whiteboard → Running App](whiteboard-to-app/)** | Snap a photo of an architecture diagram → GPT-4o parses it → generates **compile-valid Bicep** → **really deploys** the safe subset to Azure. | ✅ Live vision + real deploy working |
