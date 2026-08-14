@@ -1,0 +1,365 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Whiteboard to Azure",
+    "description": "Analyze an architecture diagram, preview generated Bicep, and deploy an approved safe subset.",
+    "version": "1.0.0"
+  },
+  "host": "whiteboard-agent.blueflower-fbbe51d8.southcentralus.azurecontainerapps.io",
+  "basePath": "/api/agent",
+  "schemes": [
+    "https"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "securityDefinitions": {
+    "apiKey": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "x-api-key"
+    }
+  },
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "paths": {
+    "/analyze": {
+      "post": {
+        "operationId": "AnalyzeArchitectureDiagram",
+        "summary": "Analyze an architecture diagram",
+        "description": "Uses a configured multimodal vision-language model to extract an architecture graph, generate Bicep and any Kubernetes manifests, and compile-validate the Bicep. This operation does not deploy resources.",
+        "x-ms-summary": "Analyze architecture diagram",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AnalyzeRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Diagram analysis and generated infrastructure",
+            "schema": {
+              "$ref": "#/definitions/AnalyzeResponse"
+            }
+          },
+          "400": {
+            "$ref": "#/responses/Error"
+          },
+          "401": {
+            "$ref": "#/responses/Error"
+          },
+          "503": {
+            "$ref": "#/responses/Error"
+          }
+        }
+      }
+    },
+    "/preview": {
+      "post": {
+        "operationId": "PreviewInfrastructurePlan",
+        "summary": "Preview an infrastructure plan",
+        "description": "Verifies the signed plan, compiles its Bicep, and runs Azure what-if when DEPLOY_RG is configured.",
+        "x-ms-summary": "Preview infrastructure plan",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/PlanRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Validation and Azure what-if result",
+            "schema": {
+              "$ref": "#/definitions/PreviewResponse"
+            }
+          },
+          "400": {
+            "$ref": "#/responses/Error"
+          },
+          "401": {
+            "$ref": "#/responses/Error"
+          }
+        }
+      }
+    },
+    "/deploy": {
+      "post": {
+        "operationId": "DeployApprovedInfrastructurePlan",
+        "summary": "Deploy an approved safe plan",
+        "description": "Deploys only the server-side allow-listed safe subset. Call this operation only after a Power Automate approval completes.",
+        "x-ms-summary": "Deploy approved plan",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DeployRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deployment result",
+            "schema": {
+              "$ref": "#/definitions/DeployResponse"
+            }
+          },
+          "400": {
+            "$ref": "#/responses/Error"
+          },
+          "401": {
+            "$ref": "#/responses/Error"
+          },
+          "403": {
+            "$ref": "#/responses/Error"
+          },
+          "503": {
+            "$ref": "#/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "responses": {
+    "Error": {
+      "description": "Request failed",
+      "schema": {
+        "$ref": "#/definitions/Error"
+      }
+    }
+  },
+  "definitions": {
+    "AnalyzeRequest": {
+      "type": "object",
+      "required": [
+        "imageBase64",
+        "contentType"
+      ],
+      "properties": {
+        "imageBase64": {
+          "type": "string",
+          "description": "Base64-encoded image content. A base64 data URL is also accepted.",
+          "x-ms-summary": "Architecture diagram"
+        },
+        "contentType": {
+          "type": "string",
+          "description": "Image media type.",
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "x-ms-summary": "Image type"
+        }
+      }
+    },
+    "PlanRequest": {
+      "type": "object",
+      "required": [
+        "planToken"
+      ],
+      "properties": {
+        "planToken": {
+          "type": "string",
+          "description": "Signed plan token returned by AnalyzeArchitectureDiagram.",
+          "x-ms-summary": "Plan token"
+        }
+      }
+    },
+    "DeployRequest": {
+      "type": "object",
+      "required": [
+        "planToken",
+        "approved",
+        "approvalId"
+      ],
+      "properties": {
+        "planToken": {
+          "type": "string",
+          "x-ms-summary": "Plan token"
+        },
+        "approved": {
+          "type": "boolean",
+          "description": "Must be true only when the approval action returned Approve.",
+          "x-ms-summary": "Approved"
+        },
+        "approvalId": {
+          "type": "string",
+          "description": "Power Automate approval identifier for audit correlation.",
+          "x-ms-summary": "Approval ID"
+        }
+      }
+    },
+    "Node": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      }
+    },
+    "Graph": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Node"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "Validation": {
+      "type": "object",
+      "properties": {
+        "validated": {
+          "type": "boolean"
+        },
+        "arm_resources": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "arm_bytes": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "required_parameters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "AnalyzeResponse": {
+      "type": "object",
+      "properties": {
+        "graph": {
+          "$ref": "#/definitions/Graph"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "bicep": {
+          "type": "string"
+        },
+        "k8s": {
+          "type": "string"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unsupported": {
+          "type": "array",
+          "description": "Detected resources that could not be represented safely.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "validation": {
+          "$ref": "#/definitions/Validation"
+        },
+        "deploymentEligible": {
+          "type": "boolean"
+        },
+        "planToken": {
+          "type": "string"
+        }
+      }
+    },
+    "WhatIf": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "output": {
+          "type": "string"
+        }
+      }
+    },
+    "PreviewResponse": {
+      "type": "object",
+      "properties": {
+        "validation": {
+          "$ref": "#/definitions/Validation"
+        },
+        "whatIf": {
+          "$ref": "#/definitions/WhatIf"
+        }
+      }
+    },
+    "DeployResponse": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "validated": {
+          "type": "boolean"
+        },
+        "resources": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "real_deploy": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

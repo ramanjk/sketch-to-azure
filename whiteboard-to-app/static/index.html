@@ -51,6 +51,11 @@
   .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
   @keyframes sp{to{transform:rotate(360deg)}}
   input[type=file]{color:var(--dim)}
+  .cardhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+  .cardhead h3{margin:0}
+  .cardactions{display:flex;gap:8px}
+  .cardactions button{padding:5px 9px;font-size:11px}
+  .note{color:var(--dim);font-size:12px;margin-bottom:10px;white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -78,7 +83,7 @@
   <div id="graphCard" class="card hide">
     <h3>Parsed architecture · <span id="gName"></span></h3>
     <div class="graph" id="graph"></div>
-    <button style="margin-top:14px" onclick="generate()">Generate IaC →</button>
+    <button style="margin-top:14px" onclick="generate()">Generate IaC + manifests →</button>
   </div>
 
   <div class="row" id="iacRow">
@@ -86,7 +91,15 @@
       <h3 id="bicepTitle">Azure infra (Bicep)</h3><pre class="iac" id="bicep"></pre>
     </div>
     <div id="k8sCard" class="card hide">
-      <h3>Kubernetes manifests</h3><pre class="iac" id="k8s"></pre>
+      <div class="cardhead">
+        <h3 id="k8sTitle">Kubernetes manifests</h3>
+        <div class="cardactions">
+          <button class="ghost" onclick="copyK8s()">Copy</button>
+          <button class="ghost" onclick="downloadK8s()">Download YAML</button>
+        </div>
+      </div>
+      <div class="note" id="k8sNote"></div>
+      <pre class="iac" id="k8s"></pre>
     </div>
   </div>
 
@@ -127,21 +140,42 @@ function renderGraph(){
 }
 async function generate(){
   const r=await fetch('/api/generate',{method:'POST',body:JSON.stringify(graph)});const iac=await r.json();
+  if(!r.ok){throw new Error(iac.error||'IaC generation failed');}
   window._kind=iac.kind;
+  window._k8s=iac.k8s||'';
   document.getElementById('bicep').textContent=iac.bicep;
   document.getElementById('bicepCard').classList.remove('hide');
   const isAzure=iac.kind==='azure-infra';
   document.getElementById('bicepTitle').textContent=isAzure?'Azure infrastructure (Bicep)':'Azure infra (Bicep)';
-  if(isAzure){
-    document.getElementById('k8sCard').classList.add('hide');
-    document.getElementById('deployBtn').textContent='🧪 Validate & deploy (bicep build)';
-  }else{
-    document.getElementById('k8s').textContent=iac.k8s||'(no stateless services in this graph)';
+  if(iac.k8s){
+    const deployments=(iac.k8s.match(/^kind: Deployment$/gm)||[]).length;
+    const services=(iac.k8s.match(/^kind: Service$/gm)||[]).length;
+    document.getElementById('k8sTitle').textContent=
+      `Kubernetes manifests · ${deployments} Deployments · ${services} Services`;
+    document.getElementById('k8s').textContent=iac.k8s;
+    document.getElementById('k8sNote').textContent=(iac.warnings||[]).join('\n');
     document.getElementById('k8sCard').classList.remove('hide');
-    document.getElementById('deployBtn').textContent='🚀 Deploy to sandbox';
+  }else{
+    document.getElementById('k8sCard').classList.add('hide');
   }
+  document.getElementById('deployBtn').textContent=isAzure
+    ?'🧪 Validate & deploy (bicep build)'
+    :'🚀 Deploy to sandbox';
   document.getElementById('deployCard').classList.remove('hide');
   on('s3');
+}
+async function copyK8s(){
+  if(!window._k8s)return;
+  await navigator.clipboard.writeText(window._k8s);
+}
+function downloadK8s(){
+  if(!window._k8s)return;
+  const blob=new Blob([window._k8s],{type:'application/yaml'});
+  const link=document.createElement('a');
+  link.href=URL.createObjectURL(blob);
+  link.download=(graph?.id||'application')+'-manifests.yaml';
+  link.click();
+  URL.revokeObjectURL(link.href);
 }
 async function deploy(){
   const st=document.getElementById('deployStatus');

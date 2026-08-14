@@ -79,6 +79,26 @@ The generator auto-detects the diagram type:
 `managedidentity`, `vm`, `privatedns`, `privateendpoint` (+ VNet/subnets/PIP/NIC
 scaffolding). Every block is verified to pass `az bicep build`.
 
+Detailed network diagrams additionally preserve individual `vnet`, `subnet`,
+`nsg`, `loadbalancer`, and `vm` instances, visible CIDRs, tier placement,
+public/internal load balancers, backend-pool membership, and database workload
+labels. Required Azure scaffolding not shown in the diagram is returned as an
+explicit warning instead of being silently hidden.
+
+Named Azure services outside the deterministic catalog are preserved as
+generic Azure resource nodes rather than coerced into the wrong service. A
+bounded AI generation-and-repair loop emits Bicep, compiles it, feeds compiler
+diagnostics back for up to three attempts, and reports assumptions or
+unsupported resources explicitly. Preview uses the exact signed Bicep returned
+at analysis time; it never regenerates a different template.
+
+AKS deployment diagrams distinguish the cluster from the applications running
+on it. Dockerfiles are build artifacts, container images are image artifacts,
+and Kubernetes icons are workloads. The generator emits one AKS cluster, ACR
+with `AcrPull`, and one Deployment+Service manifest per workload. A public
+load-balancer icon becomes a Kubernetes `LoadBalancer` Service rather than an
+unattached standalone Azure Load Balancer.
+
 ## Endpoints
 | Method | Path | Purpose |
 |---|---|---|
@@ -88,6 +108,20 @@ scaffolding). Every block is verified to pass `az bicep build`.
 | POST | `/api/parse-image` | uploaded image → graph (real vision or mock) |
 | POST | `/api/generate` | graph → Bicep (+ K8s for app patterns) |
 | POST | `/api/deploy` | app: mock URL · azure-infra: **real `az bicep build`** validation |
+| POST | `/api/agent/analyze` | authenticated image → graph + IaC + signed plan |
+| POST | `/api/agent/preview` | authenticated signed plan → validation + Azure what-if |
+| POST | `/api/agent/deploy` | approval-gated deployment of the safe subset |
+
+## Microsoft 365 Copilot agent
+
+The `copilot-studio/` folder contains an importable custom connector OpenAPI
+contract, agent instructions, and the Power Automate approval-flow setup. Agent
+endpoints require `AGENT_API_KEY`, reject mock vision results, validate all
+model-produced graph fields, sign immutable plans, and accept deployment only
+after an approval ID is supplied. See
+[`copilot-studio/README.md`](copilot-studio/README.md) for setup and publishing.
+The included `deploy-container-app.sh`, `Dockerfile`, and `infra/` templates
+provision the HTTPS API on Azure Container Apps with managed identity.
 
 ## Real GPT-4o vision + auth
 `run-live.sh` configures the endpoint/deployment and lets the server authenticate
