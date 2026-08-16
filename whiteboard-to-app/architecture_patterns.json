@@ -1,0 +1,121 @@
+{
+  "discoverySources": [
+    {
+      "name": "Azure Architecture Center",
+      "url": "https://learn.microsoft.com/en-us/azure/architecture/browse/",
+      "trust": "official"
+    },
+    {
+      "name": "GitHub three-tier architecture topic",
+      "url": "https://github.com/topics/three-tier-architecture",
+      "trust": "discovery-only"
+    }
+  ],
+  "patterns": [
+    {
+      "id": "n-tier-segmented",
+      "name": "Segmented N-tier application",
+      "signals": [
+        "web tier",
+        "business tier",
+        "application tier",
+        "database tier",
+        "virtual machine scale set",
+        "vmss"
+      ],
+      "guidance": [
+        "Preserve web, application, and data tiers as separate scaling and network boundaries.",
+        "For VM-based tiers, associate each tier with its own subnet and restrict data-tier ingress to the application tier.",
+        "Represent each visible load balancer, VM, VM scale set, NSG, and subnet separately."
+      ],
+      "sources": [
+        {
+          "name": "Azure Architecture Center: N-tier architecture style",
+          "url": "https://learn.microsoft.com/en-us/azure/architecture/guide/architecture-styles/n-tier",
+          "trust": "official"
+        },
+        {
+          "name": "Week-2 Azure CloudOps",
+          "url": "https://github.com/Joelayo/Week-2_Azure_CloudOps",
+          "trust": "topology-example"
+        }
+      ]
+    },
+    {
+      "id": "app-service-sql-private",
+      "name": "Secure App Service and SQL three-tier application",
+      "signals": [
+        "app service",
+        "azure sql",
+        "sql database",
+        "private endpoint",
+        "private link",
+        "vnet integration"
+      ],
+      "guidance": [
+        "Keep the web App Service, API App Service, and Azure SQL Database as distinct deployable resources.",
+        "Only create private endpoints, private DNS zones, or VNet integration when they are visible in the diagram.",
+        "Prefer managed identity and Microsoft Entra authentication over embedded SQL credentials.",
+        "A public Application Gateway or WAF is ingress, not a replacement for either App Service tier."
+      ],
+      "sources": [
+        {
+          "name": "Azure sample: App Service and SQL three-tier private networking",
+          "url": "https://github.com/Azure-Samples/app-service-and-sql-database-3-tier-with-private-networking-and-auth",
+          "trust": "official-sample"
+        },
+        {
+          "name": "Azure Architecture Center: App Service baseline",
+          "url": "https://learn.microsoft.com/en-us/azure/architecture/web-apps/app-service/architectures/baseline-zone-redundant",
+          "trust": "official"
+        }
+      ]
+    },
+    {
+      "id": "serverless-static-functions-cosmos",
+      "name": "Serverless static web application with Functions and Cosmos DB",
+      "signals": [
+        "static web app",
+        "azure functions",
+        "function app",
+        "cosmos db",
+        "application insights"
+      ],
+      "guidance": [
+        "Preserve Static Web Apps, Function Apps, Cosmos DB, Storage, Key Vault, and monitoring as distinct services.",
+        "Private endpoints and VNet integration must follow the drawn app and data subnet boundaries.",
+        "Use managed identity for service access and do not turn pipeline or source artifacts into Azure resources."
+      ],
+      "sources": [
+        {
+          "name": "3-Tier Application Azure",
+          "url": "https://github.com/Harshil-kumar-4/3-Tier-Application-Azure",
+          "trust": "topology-example"
+        }
+      ]
+    },
+    {
+      "id": "aks-baseline-workloads",
+      "name": "AKS platform with multiple application workloads",
+      "signals": [
+        "azure kubernetes service",
+        "aks",
+        "kubernetes",
+        "container registry",
+        "acr"
+      ],
+      "guidance": [
+        "A single AKS boundary containing multiple workload icons is one cluster with multiple Kubernetes workloads.",
+        "Generate Kubernetes Deployments and Services for visible workloads; container images are build artifacts, not clusters.",
+        "Keep cluster infrastructure, ingress, registry, identity, networking, and in-cluster manifests separate."
+      ],
+      "sources": [
+        {
+          "name": "Azure Architecture Center: AKS baseline",
+          "url": "https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/containers/aks/baseline-aks",
+          "trust": "official"
+        }
+      ]
+    }
+  ]
+}

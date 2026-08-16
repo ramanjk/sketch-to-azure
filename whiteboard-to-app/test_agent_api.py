@@ -146,6 +146,20 @@ class AgentApiTests(unittest.TestCase):
             self.assertEqual(server.generate_iac(GENERIC_GRAPH), SIGNED_IAC)
         generic.assert_called_once_with(GENERIC_GRAPH)
 
+    def test_selects_reference_patterns_from_detected_services(self):
+        selected = server._select_reference_patterns(GENERIC_GRAPH)
+        self.assertEqual(
+            [pattern["id"] for pattern in selected],
+            ["serverless-static-functions-cosmos"])
+
+    def test_reference_guidance_is_advisory(self):
+        context = server._reference_context(GENERIC_GRAPH)
+        self.assertIn("serverless-static-functions-cosmos", context)
+        self.assertIn("never add a resource", context)
+        self.assertIn(
+            "https://github.com/Harshil-kumar-4/3-Tier-Application-Azure",
+            context)
+
     def test_decodes_supported_image(self):
         body = {
             "contentType": "image/png",

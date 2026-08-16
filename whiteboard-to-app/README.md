@@ -150,6 +150,9 @@ Set `DEPLOY_RG=<rg>` to also run a real `az deployment group what-if` preview.
 ## Where the real magic plugs in
 - `_azure_vision_parse()` (server.py) → GPT-4o vision structured-output call.
 - `azure_iac.py` → Azure Bicep templates; extend `AZURE_TYPES` + block builders for more services.
+- `architecture_patterns.json` → source-attributed reference guidance selected
+  from detected services and supplied to generic IaC generation. Guidance is
+  advisory and never authorizes inventing resources absent from the diagram.
 - `validate_bicep()` / `_what_if()` → real Bicep compile + optional what-if preview.
 - `deploy()` → swap the sandbox URL for a real `az deployment group create` when ready.
 - App-pattern logic: `generate_iac()`, `BICEP_FOR`, `K8S_KINDS`, `sketches.json`.

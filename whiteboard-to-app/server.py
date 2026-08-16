@@ -40,6 +40,50 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 with open(os.path.join(HERE, "sketches.json"), encoding="utf-8") as f:
     SKETCHES = json.load(f)
+with open(os.path.join(HERE, "architecture_patterns.json"), encoding="utf-8") as f:
+    ARCHITECTURE_KNOWLEDGE = json.load(f)
+
+
+def _select_reference_patterns(graph, limit=3):
+    searchable = json.dumps(graph, separators=(",", ":")).lower()
+    scored = []
+    for pattern in ARCHITECTURE_KNOWLEDGE["patterns"]:
+        matches = [
+            signal for signal in pattern["signals"]
+            if signal.lower() in searchable
+        ]
+        if matches:
+            scored.append((len(matches), pattern["id"], pattern))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [item[2] for item in scored[:limit]]
+
+
+def _reference_context(graph):
+    patterns = _select_reference_patterns(graph)
+    if not patterns:
+        return ""
+    selected = [{
+        "id": pattern["id"],
+        "guidance": pattern["guidance"],
+        "sources": [source["url"] for source in pattern["sources"]],
+    } for pattern in patterns]
+    return (
+        "\nCurated reference guidance selected from detected services. This is "
+        "advisory only: never add a resource unless the graph contains visible "
+        "evidence for it.\n"
+        + json.dumps(selected, separators=(",", ":"), sort_keys=True)
+    )
+
+
+def _reference_sources(graph):
+    return [
+        {
+            "id": pattern["id"],
+            "name": pattern["name"],
+            "sources": pattern["sources"],
+        }
+        for pattern in _select_reference_patterns(graph)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -539,7 +583,8 @@ def _generic_azure_bicep(graph):
         {"role": "system", "content": GENERIC_BICEP_SYSTEM},
         {"role": "user", "content": (
             "Generate Bicep for this architecture graph:\n"
-            + json.dumps(graph, separators=(",", ":"), sort_keys=True))},
+            + json.dumps(graph, separators=(",", ":"), sort_keys=True)
+            + _reference_context(graph))},
     ]
     last_reason = "generation did not return Bicep"
     max_attempts = int(os.environ.get("GENERIC_IAC_MAX_ATTEMPTS", "5"))
@@ -901,6 +946,7 @@ def analyze_for_agent(body):
         "k8s": iac.get("k8s", ""),
         "warnings": warnings,
         "unsupported": iac.get("unsupported", []),
+        "references": _reference_sources(graph),
         "validation": validation,
         "deploymentEligible": eligible,
         "planToken": _create_plan_token(

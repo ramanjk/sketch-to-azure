@@ -12,7 +12,7 @@ RUN az bicep install \
     && chown -R 10001:0 /home/app \
     && chmod -R g=u /home/app
 
-COPY --chown=10001:0 server.py azure_iac.py sketches.json container-entrypoint.sh ./
+COPY --chown=10001:0 server.py azure_iac.py sketches.json architecture_patterns.json container-entrypoint.sh ./
 COPY --chown=10001:0 static ./static
 
 RUN chmod 0555 /app/container-entrypoint.sh

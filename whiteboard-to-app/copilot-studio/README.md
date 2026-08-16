@@ -58,6 +58,8 @@ Create a solution-aware cloud flow named **Analyze Architecture Diagram**:
    trigger file content to `imageBase64` and its media type to `contentType`.
    If the trigger exposes binary content, use the Power Automate `base64()`
    expression.
+   The response also includes `references`, the source-attributed architecture
+   patterns selected from services detected in the diagram.
 4. Call **Preview infrastructure plan** with the returned `planToken`.
 5. Return the graph, Bicep, Kubernetes `k8s` manifest bundle, warnings,
    unsupported resources, validation, deployment eligibility, plan token, and

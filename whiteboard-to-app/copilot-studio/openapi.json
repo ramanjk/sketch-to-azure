@@ -158,7 +158,7 @@
         },
         "contentType": {
           "type": "string",
-          "description": "Image media type.",
+          "description": "Architecture diagram file media type.",
           "enum": [
             "image/jpeg",
             "image/png",
@@ -299,6 +299,13 @@
             "type": "string"
           }
         },
+        "references": {
+          "type": "array",
+          "description": "Curated architecture references selected from services detected in the diagram.",
+          "items": {
+            "$ref": "#/definitions/ReferencePattern"
+          }
+        },
         "validation": {
           "$ref": "#/definitions/Validation"
         },
@@ -307,6 +314,37 @@
         },
         "planToken": {
           "type": "string"
+        }
+      }
+    },
+    "ReferenceSource": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "trust": {
+          "type": "string"
+        }
+      }
+    },
+    "ReferencePattern": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReferenceSource"
+          }
         }
       }
     },
