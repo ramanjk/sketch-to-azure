@@ -178,6 +178,10 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(normalized["nodes"][0]["type"], "aks")
         self.assertEqual(normalized["nodes"][1]["type"], "azure")
 
+        graph["nodes"][1]["type"] = "aks"
+        normalized = server._normalize_vision_graph(graph)
+        self.assertEqual(normalized["nodes"][1]["type"], "azure")
+
     def test_generic_azure_graph_uses_extensible_generator(self):
         with patch.object(
                 server, "_generic_azure_bicep",

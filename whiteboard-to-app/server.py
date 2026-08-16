@@ -536,6 +536,11 @@ def _normalize_vision_graph(graph):
     for node in nodes:
         label = str(node.get("label", "")).lower()
         service = str(node.get("properties", {}).get("service", "")).lower()
+        if (node.get("type") == "aks"
+                and ("fleet hub" in label or "microsoft-managed" in label)):
+            node["type"] = "azure"
+            node.setdefault("properties", {})["service"] = (
+                "Azure Kubernetes Fleet Manager hub cluster")
         if (node.get("type") == "azure"
                 and service == "kubernetes services"
                 and "fleet hub" not in label
