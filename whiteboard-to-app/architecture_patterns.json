@@ -135,10 +135,13 @@
         "Map aroClientId and aroClientSecret to servicePrincipalProfile, aroPullSecret to clusterProfile.pullSecret, the visible control-plane subnet to masterProfile.subnetId, and the visible worker subnet to workerProfiles[0].subnetId.",
         "Put aroVersion inside clusterProfile.version. clusterProfile.resourceGroupId must identify a distinct ARO-managed resource group, not resourceGroup().id.",
         "Set masterProfile.vmSize. Set each worker profile name, count, diskSizeGB, vmSize, and subnetId. When the visible subnets have NSGs, set networkProfile.preconfiguredNSG to Enabled and state that the ARO service principal needs the documented network permissions.",
+        "Add manualActions to register Microsoft.RedHatOpenShift, Microsoft.Compute, Microsoft.Storage, and Microsoft.Authorization; verify at least 44 regional vCPUs and selected VM SKU availability; validate IBM MAS, OpenShift, and ARO version compatibility; grant the ARO service principal required network permissions; and provide every required parameter.",
+        "Add a manualAction to install IBM Maximo Application Suite with IBM-supported Marketplace or automation after ARO is ready. Keep this action as a Bicep comment so MAS is not silently omitted.",
+        "Emit actual Microsoft.Storage/storageAccounts/fileServices/shares child resources for the visible Premium NFS and Standard SMB Azure Files shares. Do not move share creation into manualActions.",
         "Azure SQL Managed Instance is supported in this pattern; do not substitute Azure SQL Database or Cosmos DB.",
         "If SQL Managed Instance is emitted, use an @secure administrator-password parameter with a newGuid() default; never hard-code a password.",
         "Do not invent Kubernetes manifests for IBM Maximo. MAS installation requires IBM-supported automation and version compatibility inputs that are not encoded in the architecture diagram.",
-        "Twilio SendGrid is a third-party service. If it is detected, list it as unsupported and do not replace it with Azure Communication Services."
+        "Twilio SendGrid is a third-party service. If it is detected, list it as unsupported, add a manualAction to configure it separately, and do not replace it with Azure Communication Services."
       ],
       "sources": [
         {

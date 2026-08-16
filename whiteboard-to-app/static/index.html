@@ -88,7 +88,9 @@
 
   <div class="row" id="iacRow">
     <div id="bicepCard" class="card hide">
-      <h3 id="bicepTitle">Azure infra (Bicep)</h3><pre class="iac" id="bicep"></pre>
+      <h3 id="bicepTitle">Azure infra (Bicep)</h3>
+      <div class="note" id="bicepNote"></div>
+      <pre class="iac" id="bicep"></pre>
     </div>
     <div id="k8sCard" class="card hide">
       <div class="cardhead">
@@ -148,7 +150,12 @@ async function generate(){
   if(!r.ok){throw new Error(iac.error||'IaC generation failed');}
   window._kind=iac.kind;
   window._k8s=iac.k8s||'';
+  window._requiresParameters=!!iac.requiresParameters;
   document.getElementById('bicep').textContent=iac.bicep;
+  const actions=iac.manualActions||[];
+  document.getElementById('bicepNote').textContent=actions.length
+    ?'Pre-deployment actions:\n'+actions.map((item,index)=>`${index+1}. ${item}`).join('\n')
+    :'No manual pre-deployment actions reported.';
   document.getElementById('bicepCard').classList.remove('hide');
   const isAzure=iac.kind==='azure-infra';
   document.getElementById('bicepTitle').textContent=isAzure?'Azure infrastructure (Bicep)':'Azure infra (Bicep)';
@@ -163,8 +170,10 @@ async function generate(){
   }else{
     document.getElementById('k8sCard').classList.add('hide');
   }
-  document.getElementById('deployBtn').textContent=isAzure
-    ?'🧪 Validate & deploy (bicep build)'
+  document.getElementById('deployBtn').disabled=window._requiresParameters;
+  document.getElementById('deployBtn').textContent=window._requiresParameters
+    ?'⚠ Provide required inputs before deploy'
+    :isAzure?'🧪 Validate & deploy (bicep build)'
     :'🚀 Deploy to sandbox';
   document.getElementById('deployCard').classList.remove('hide');
   on('s3');

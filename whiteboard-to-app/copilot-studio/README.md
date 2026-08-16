@@ -60,6 +60,9 @@ Create a solution-aware cloud flow named **Analyze Architecture Diagram**:
    expression.
    The response also includes `references`, the source-attributed architecture
    patterns selected from services detected in the diagram.
+   Present `manualActions` and `validation.required_parameters` to the user
+   before requesting approval. Do not call Preview or Deploy until required
+   inputs and prerequisite checks are complete.
 4. Call **Preview infrastructure plan** with the returned `planToken`.
 5. Return the graph, Bicep, Kubernetes `k8s` manifest bundle, warnings,
    unsupported resources, validation, deployment eligibility, plan token, and

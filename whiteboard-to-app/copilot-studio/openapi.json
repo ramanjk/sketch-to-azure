@@ -300,6 +300,13 @@
             "type": "string"
           }
         },
+        "manualActions": {
+          "type": "array",
+          "description": "Actions and prerequisite checks the user must complete before preview or deployment.",
+          "items": {
+            "type": "string"
+          }
+        },
         "references": {
           "type": "array",
           "description": "Curated architecture references selected from services detected in the diagram.",

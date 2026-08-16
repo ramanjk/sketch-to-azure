@@ -386,6 +386,17 @@ class AgentApiTests(unittest.TestCase):
             server._normalize_generated_bicep(source),
             "var items = [\n  {\n    name: 'one'\n  }\n]")
 
+    def test_bicep_preserves_manual_components_as_comments(self):
+        bicep = server._bicep_with_manual_actions(
+            "param location string = resourceGroup().location",
+            ["Register Microsoft.RedHatOpenShift"],
+            ["twilio-sendgrid"],
+        )
+        self.assertIn("// PRE-DEPLOYMENT MANUAL ACTIONS", bicep)
+        self.assertIn("Register Microsoft.RedHatOpenShift", bicep)
+        self.assertIn(
+            "Complete external or manual component: twilio-sendgrid", bicep)
+
     def test_detects_hard_coded_bicep_secrets(self):
         bicep = (
             "resource sql 'Microsoft.Sql/managedInstances@2023-08-01' = {\n"
@@ -401,6 +412,27 @@ class AgentApiTests(unittest.TestCase):
             server._bicep_secret_violations(
                 "@secure()\nparam adminPassword string = newGuid()\n"),
             [])
+
+    def test_detects_missing_deployable_graph_resources(self):
+        graph = {
+            "id": "aro-files",
+            "name": "ARO with Azure Files",
+            "nodes": [
+                {"id": "aro", "type": "azure",
+                 "label": "Azure Red Hat OpenShift"},
+                {"id": "files", "type": "azure",
+                 "label": "Azure Files Premium"},
+            ],
+            "edges": [],
+        }
+        violations = server._graph_resource_coverage_violations(
+            graph,
+            {"resource_type_counts": {
+                "Microsoft.RedHatOpenShift/openShiftClusters": 1,
+            }})
+        self.assertEqual(
+            violations,
+            ["Azure Files share requires 1 Bicep resource(s), but 0 were generated"])
 
     def test_generic_generation_retries_timeout(self):
         generated = {
@@ -454,6 +486,11 @@ class AgentApiTests(unittest.TestCase):
         self.assertTrue(result["requiresParameters"])
         self.assertEqual(
             result["requiredParameters"], ["pullSecret", "aroVersion"])
+        self.assertIn(
+            "Provide deployment values for required parameters",
+            result["manualActions"][-1])
+        self.assertIn(
+            "// PRE-DEPLOYMENT MANUAL ACTIONS", result["bicep"])
 
     def test_preview_does_not_run_without_required_parameters(self):
         token = server._create_plan_token(GRAPH, SIGNED_IAC)
@@ -537,6 +574,8 @@ class AgentApiTests(unittest.TestCase):
             encoding="utf-8")
         self.assertIn("if(iac.k8s)", html)
         self.assertIn("Download YAML", html)
+        self.assertIn("Pre-deployment actions:", html)
+        self.assertIn("Provide required inputs before deploy", html)
         self.assertNotIn(
             "if(isAzure){\n    document.getElementById('k8sCard')"
             ".classList.add('hide')",
