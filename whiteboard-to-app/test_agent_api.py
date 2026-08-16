@@ -165,6 +165,12 @@ class AgentApiTests(unittest.TestCase):
             self.assertEqual(server.generate_iac(GENERIC_GRAPH), SIGNED_IAC)
         generic.assert_called_once_with(GENERIC_GRAPH)
 
+    def test_generic_graph_skips_vm_topology_warnings(self):
+        with patch.object(
+                server.azure_iac, "topology_warnings") as topology_warnings:
+            self.assertEqual(server._topology_warnings(GENERIC_GRAPH), [])
+        topology_warnings.assert_not_called()
+
     def test_selects_reference_patterns_from_detected_services(self):
         selected = server._select_reference_patterns(GENERIC_GRAPH)
         self.assertEqual(
@@ -285,8 +291,11 @@ class AgentApiTests(unittest.TestCase):
     def test_signed_plan_round_trip_and_tamper_rejection(self):
         token = server._create_plan_token(GRAPH)
         self.assertEqual(server._verify_plan_token(token), GRAPH)
+        payload, signature = token.split(".", 1)
+        tampered = payload + "." + (
+            "A" if signature[0] != "A" else "B") + signature[1:]
         with self.assertRaisesRegex(ValueError, "signature"):
-            server._verify_plan_token(token[:-1] + ("A" if token[-1] != "A" else "B"))
+            server._verify_plan_token(tampered)
 
     def test_expired_plan_is_rejected(self):
         with patch.object(server.time, "time", return_value=time.time() - 90000):

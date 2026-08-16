@@ -87,6 +87,12 @@ def _reference_sources(graph):
     ]
 
 
+def _topology_warnings(graph):
+    if any(node.get("type") == "azure" for node in graph.get("nodes", [])):
+        return []
+    return azure_iac.topology_warnings(graph)
+
+
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # INTEGRATION HOOK -- vision parse.
@@ -1125,7 +1131,7 @@ def analyze_for_agent(body):
         graph = _validate_graph(_azure_vision_parse(content, media_type))
     iac = generate_iac(graph)
     validation = validate_bicep(iac.get("bicep", ""))
-    warnings = azure_iac.topology_warnings(graph)
+    warnings = _topology_warnings(graph)
     warnings.extend(iac.get("warnings", []))
     eligible = (
         iac.get("kind") == "azure-infra"
