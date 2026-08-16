@@ -46,7 +46,6 @@
       "name": "Secure App Service and SQL three-tier application",
       "signals": [
         "app service",
-        "azure sql",
         "sql database",
         "private endpoint",
         "private link",
@@ -113,6 +112,34 @@
         {
           "name": "Azure Architecture Center: AKS baseline",
           "url": "https://learn.microsoft.com/en-us/azure/architecture/reference-architectures/containers/aks/baseline-aks",
+          "trust": "official"
+        }
+      ]
+    },
+    {
+      "id": "ibm-maximo-aro",
+      "name": "IBM Maximo Application Suite on Azure Red Hat OpenShift",
+      "signals": [
+        "ibm maximo",
+        "maximo application suite",
+        "azure red hat openshift",
+        "aro control plane",
+        "aro worker"
+      ],
+      "guidance": [
+        "Preserve Azure Red Hat OpenShift as ARO; never translate it into AKS.",
+        "Model the ARO control-plane and worker subnets, public and internal load balancers, NSGs, DNS zones, ExpressRoute gateway, Bastion, Azure Files shares, optional jump box, and SQL Managed Instance only when visible.",
+        "ARO managed control-plane and worker-node labels describe cluster configuration, not independent Azure VM resources.",
+        "An ARO cluster requires a pull secret and service-principal inputs. When safe references for those inputs are absent, omit the ARO cluster resource and list the ARO service, managed control plane, and worker-node graph nodes as unsupported; never use placeholder credentials.",
+        "Azure SQL Managed Instance is supported in this pattern; do not substitute Azure SQL Database or Cosmos DB.",
+        "If SQL Managed Instance is emitted, use an @secure administrator-password parameter with a newGuid() default; never hard-code a password.",
+        "Do not invent Kubernetes manifests for IBM Maximo. MAS installation requires IBM-supported automation and version compatibility inputs that are not encoded in the architecture diagram.",
+        "Twilio SendGrid is a third-party service. If it is detected, list it as unsupported and do not replace it with Azure Communication Services."
+      ],
+      "sources": [
+        {
+          "name": "Azure Architecture Center: Deploy IBM Maximo Application Suite on Azure",
+          "url": "https://learn.microsoft.com/en-us/azure/architecture/example-scenario/apps/deploy-ibm-maximo-application-suite",
           "trust": "official"
         }
       ]

@@ -91,6 +91,25 @@ def vsdx_bytes(unsafe=False):
     return stream.getvalue()
 
 
+def svg_bytes(unsafe=False):
+    declaration = (
+        '<!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+        if unsafe else "")
+    return (declaration + """
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+        <g id="aro" transform="translate(10,-20)">
+          <title>Azure Red Hat OpenShift</title>
+          <desc>ARO worker nodes with IBM Maximo Application Suite</desc>
+          <text>ARO worker nodes</text>
+        </g>
+        <g id="connector" transform="translate(5,6)">
+          <title>Dynamic connector.1</title>
+          <path d="M0 0 L10 10"/>
+        </g>
+      </svg>
+    """).encode()
+
+
 class AgentApiTests(unittest.TestCase):
     def setUp(self):
         self.env = patch.dict(os.environ, {
@@ -160,6 +179,17 @@ class AgentApiTests(unittest.TestCase):
             "https://github.com/Harshil-kumar-4/3-Tier-Application-Azure",
             context)
 
+    def test_selects_maximo_aro_reference(self):
+        graph = {
+            "id": "maximo",
+            "name": "IBM Maximo on Azure Red Hat OpenShift",
+            "nodes": [],
+            "edges": [],
+        }
+        self.assertEqual(
+            server._select_reference_patterns(graph)[0]["id"],
+            "ibm-maximo-aro")
+
     def test_decodes_supported_image(self):
         body = {
             "contentType": "image/png",
@@ -177,6 +207,48 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(
             server._decode_agent_file(body),
             (content, server.VSDX_MEDIA_TYPE))
+
+    def test_detects_svg_with_misleading_png_type(self):
+        content = svg_bytes()
+        body = {
+            "contentType": "image/png",
+            "imageBase64": base64.b64encode(content).decode("ascii"),
+        }
+        self.assertEqual(
+            server._decode_agent_file(body),
+            (content, server.SVG_MEDIA_TYPE))
+
+    def test_extracts_svg_shapes_and_connectors(self):
+        structure = server._extract_svg_structure(svg_bytes())
+        self.assertEqual(
+            structure["shapes"][0]["label"],
+            "ARO worker nodes with IBM Maximo Application Suite")
+        self.assertEqual(structure["shapes"][0]["x"], 10.0)
+        self.assertEqual(structure["shapes"][0]["y"], -20.0)
+        self.assertEqual(structure["connectors"][0]["path"], "M0 0 L10 10")
+
+    def test_rejects_unsafe_svg_xml(self):
+        with self.assertRaisesRegex(ValueError, "declarations"):
+            server._extract_svg_structure(svg_bytes(unsafe=True))
+
+    def test_svg_parse_uses_structured_completion(self):
+        with patch.object(
+                server, "_azure_json_completion",
+                return_value=GENERIC_GRAPH) as completion:
+            graph = server._azure_svg_parse(svg_bytes())
+        self.assertEqual(graph, GENERIC_GRAPH)
+        prompt = completion.call_args.args[0][1]["content"]
+        self.assertIn("IBM Maximo Application Suite", prompt)
+        self.assertIn("M0 0 L10 10", prompt)
+
+    def test_live_parse_does_not_fall_back_to_mock(self):
+        with patch.object(
+                server, "_azure_vision_configured",
+                return_value=True), patch.object(
+                server, "_azure_vision_parse",
+                side_effect=RuntimeError("vision failed")):
+            with self.assertRaisesRegex(RuntimeError, "vision failed"):
+                server.parse_sketch(image_bytes=b"invalid image")
 
     def test_extracts_visio_shapes_and_connectors(self):
         structure = server._extract_vsdx_structure(vsdx_bytes())
@@ -276,6 +348,22 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(
             server._normalize_generated_bicep(source),
             "var items = [\n  {\n    name: 'one'\n  }\n]")
+
+    def test_detects_hard_coded_bicep_secrets(self):
+        bicep = (
+            "resource sql 'Microsoft.Sql/managedInstances@2023-08-01' = {\n"
+            "  properties: {\n"
+            "    administratorLoginPassword: 'ChangeMe123!'\n"
+            "  }\n"
+            "}\n"
+        )
+        self.assertEqual(
+            server._bicep_secret_violations(bicep),
+            ["administratorLoginPassword: 'ChangeMe123!'"])
+        self.assertEqual(
+            server._bicep_secret_violations(
+                "@secure()\nparam adminPassword string = newGuid()\n"),
+            [])
 
     def test_generic_generation_retries_timeout(self):
         generated = {

@@ -153,6 +153,9 @@ Set `DEPLOY_RG=<rg>` to also run a real `az deployment group what-if` preview.
 - `architecture_patterns.json` → source-attributed reference guidance selected
   from detected services and supplied to generic IaC generation. Guidance is
   advisory and never authorizes inventing resources absent from the diagram.
+- Image ingestion detects SVG content even when a downloaded Architecture
+  Center file has a misleading extension, and securely extracts labeled shapes
+  before AI graph parsing.
 - `validate_bicep()` / `_what_if()` → real Bicep compile + optional what-if preview.
 - `deploy()` → swap the sandbox URL for a real `az deployment group create` when ready.
 - App-pattern logic: `generate_iac()`, `BICEP_FOR`, `K8S_KINDS`, `sketches.json`.

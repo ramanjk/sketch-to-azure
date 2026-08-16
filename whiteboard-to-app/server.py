@@ -36,6 +36,7 @@ AGENT_IMAGE_MAX_BYTES = int(
 AGENT_PLAN_TTL_SECONDS = int(os.environ.get("AGENT_PLAN_TTL_SECONDS", "86400"))
 AGENT_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
 VSDX_MEDIA_TYPE = "application/vnd.ms-visio.drawing"
+SVG_MEDIA_TYPE = "image/svg+xml"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 with open(os.path.join(HERE, "sketches.json"), encoding="utf-8") as f:
@@ -140,6 +141,7 @@ VISION_SYSTEM = (
     "Container Registry->acr, App Configuration->appconfig, "
     "Managed Identity->managedidentity, Virtual Machine/Jumpbox/Agent->vm, "
     "Private DNS->privatedns, Private Endpoint->privateendpoint, "
+    "Public DNS zone->azure with service Azure DNS public zone, "
     "Client/Browser/User/Admin->frontend. A database logo inside a VM remains "
     "type vm with role database and engine set to the visible database engine. "
     "For any named Azure service without an exact dedicated type above, use "
@@ -371,6 +373,124 @@ def _azure_vsdx_parse(vsdx_bytes):
     return _normalize_vision_graph(result)
 
 
+def _looks_like_svg(content):
+    prefix = content[:4096].lstrip(b"\xef\xbb\xbf\t\r\n ")
+    return bool(re.search(br"<svg(?:\s|>)", prefix, re.IGNORECASE))
+
+
+def _parse_svg_xml(content):
+    upper = content[:4096].upper()
+    if b"<!ENTITY" in upper:
+        raise ValueError("SVG XML declarations are not allowed")
+    if b"<!DOCTYPE" in upper:
+        safe_doctype = re.compile(
+            br'<!DOCTYPE\s+svg\s+PUBLIC\s+"-//W3C//DTD SVG 1\.1//EN"\s+'
+            br'"http://www\.w3\.org/Graphics/SVG/1\.1/DTD/svg11\.dtd"\s*>',
+            re.IGNORECASE)
+        cleaned, count = safe_doctype.subn(b"", content, count=1)
+        if count != 1 or b"<!DOCTYPE" in cleaned[:4096].upper():
+            raise ValueError("SVG XML declarations are not allowed")
+        content = cleaned
+    try:
+        root = ET.fromstring(content)
+    except ET.ParseError:
+        raise ValueError("SVG file contains invalid XML")
+    if root.tag.rsplit("}", 1)[-1] != "svg":
+        raise ValueError("SVG file has an invalid root element")
+    if sum(1 for _ in root.iter()) > 10000:
+        raise ValueError("SVG file contains too many elements")
+    return root
+
+
+def _svg_direct_text(element, name):
+    for child in list(element):
+        if child.tag.rsplit("}", 1)[-1] == name:
+            return " ".join("".join(child.itertext()).split())[:500]
+    return ""
+
+
+def _svg_translation(value):
+    x = y = 0.0
+    for match in re.finditer(
+            r"translate\(\s*([-+]?\d*\.?\d+)"
+            r"(?:[\s,]+([-+]?\d*\.?\d+))?\s*\)", value or ""):
+        x += float(match.group(1))
+        y += float(match.group(2) or 0)
+    for match in re.finditer(
+            r"matrix\(\s*1(?:\.0+)?[\s,]+0(?:\.0+)?[\s,]+"
+            r"0(?:\.0+)?[\s,]+1(?:\.0+)?[\s,]+"
+            r"([-+]?\d*\.?\d+)[\s,]+([-+]?\d*\.?\d+)\s*\)",
+            value or ""):
+        x += float(match.group(1))
+        y += float(match.group(2))
+    return x, y
+
+
+def _extract_svg_structure(svg_bytes):
+    root = _parse_svg_xml(svg_bytes)
+    shapes = []
+    connectors = []
+
+    def walk(element, parent_x=0.0, parent_y=0.0):
+        offset_x, offset_y = _svg_translation(element.get("transform"))
+        x, y = parent_x + offset_x, parent_y + offset_y
+        title = _svg_direct_text(element, "title")
+        description = _svg_direct_text(element, "desc")
+        text = _svg_direct_text(element, "text")
+        if description:
+            shapes.append({
+                "id": element.get("id", "shape-%d" % (len(shapes) + 1)),
+                "master": title,
+                "label": description,
+                "text": text,
+                "x": round(x, 3),
+                "y": round(y, 3),
+            })
+        elif title.lower().startswith("dynamic connector"):
+            path = next((
+                child.get("d", "") for child in element.iter()
+                if child.tag.rsplit("}", 1)[-1] == "path"
+                and child.get("d")), "")
+            connectors.append({
+                "id": element.get(
+                    "id", "connector-%d" % (len(connectors) + 1)),
+                "path": path[:1000],
+                "x": round(x, 3),
+                "y": round(y, 3),
+            })
+        for child in list(element):
+            walk(child, x, y)
+
+    walk(root)
+    if not shapes:
+        raise ValueError("SVG diagram contains no readable labeled shapes")
+    if len(shapes) > 500 or len(connectors) > 500:
+        raise ValueError("SVG diagram exceeds the shape limit")
+    return {
+        "format": "SVG architecture diagram",
+        "viewBox": root.get("viewBox", "")[:200],
+        "shapes": shapes,
+        "connectors": connectors,
+    }
+
+
+def _azure_svg_parse(svg_bytes):
+    structure = _extract_svg_structure(svg_bytes)
+    result = _azure_json_completion([
+        {"role": "system", "content": VISION_SYSTEM},
+        {"role": "user", "content": (
+            "Parse this structured extraction from an SVG architecture "
+            "diagram. Shape master and label values identify services; x/y "
+            "coordinates and connector paths describe layout. Return the "
+            "architecture graph using the required JSON shape.\n"
+            + json.dumps(structure, separators=(",", ":")))},
+    ], max_tokens=5000)
+    result.setdefault("id", "svg-architecture")
+    result.setdefault("name", "SVG architecture")
+    result.setdefault("edges", [])
+    return _normalize_vision_graph(result)
+
+
 def _semantic_role(node):
     value = ("%s %s" % (
         node.get("id", ""), node.get("label", ""))).lower()
@@ -396,6 +516,10 @@ def _normalize_vision_graph(graph):
     for node in nodes:
         label = str(node.get("label", "")).lower()
         service = str(node.get("properties", {}).get("service", "")).lower()
+        if node.get("type") == "privatedns" and "public" in label:
+            node["type"] = "azure"
+            node.setdefault("properties", {})["service"] = (
+                "Azure DNS public zone")
         if node.get("type") == "azure" and "container image" in service:
             node["type"] = "containerimage"
             node.setdefault("properties", {})["role"] = _semantic_role(node)
@@ -466,6 +590,13 @@ Requirements:
 - Use parameters for location and environment-specific values. Never emit a
   credential, token, connection string, or secret literal.
 - Never output secrets or values from listKeys/listConnectionStrings.
+- Never use empty, fake, example, or placeholder credentials, pull secrets,
+  service-principal values, certificates, or passwords. If a resource requires
+  one and the graph doesn't provide a safe reference, omit that resource and
+  list its graph node in unsupported.
+- A required generated administrator password may use an `@secure()` parameter
+  whose default is `newGuid()`. Never place a string literal in a password,
+  secret, token, or credential property.
 - Every parameter must have a safe default so unattended Azure what-if can
   run. Derive globally unique resource-name defaults with uniqueString().
   Prefer managed identity and resource references over connection-string or
@@ -475,6 +606,7 @@ Requirements:
   each addition in assumptions.
 - If a graph node cannot be represented safely, list it in unsupported rather
   than substituting a different Azure service.
+- Never emit a substitute resource for a node listed in unsupported.
 - Site Recovery labels represent replication intent, not extra load balancers
   or vaults by themselves. Mark them unsupported unless the graph contains
   enough recovery-fabric, protection-container, policy, and protected-item
@@ -575,6 +707,20 @@ def _normalize_generated_bicep(bicep):
     return re.sub(r",([ \t]*(?://[^\n]*)?\n)", r"\1", bicep).strip()
 
 
+def _bicep_secret_violations(bicep):
+    sensitive_property = re.compile(
+        r"(?im)^\s*[A-Za-z0-9_]*(?:password|secret|token|credential)"
+        r"[A-Za-z0-9_]*\s*:\s*'[^'\n]*'")
+    sensitive_default = re.compile(
+        r"(?im)^\s*param\s+[A-Za-z0-9_]*(?:password|secret|token|credential)"
+        r"[A-Za-z0-9_]*\s+\w+\s*=\s*'[^'\n]*'")
+    return [
+        match.group(0).strip()
+        for pattern in (sensitive_property, sensitive_default)
+        for match in pattern.finditer(bicep)
+    ][:20]
+
+
 def _generic_azure_bicep(graph):
     if not _azure_vision_configured():
         raise RuntimeError(
@@ -614,12 +760,14 @@ def _generic_azure_bicep(graph):
             "Generation limitation: %s" % item for item in limitations)
         validation = validate_bicep(bicep)
         required = validation.get("required_parameters", [])
+        secret_violations = _bicep_secret_violations(bicep)
         preflight = None
-        if validation.get("validated") and not required:
+        if validation.get("validated") and not required and not secret_violations:
             rg = os.environ.get("DEPLOY_RG")
             if rg:
                 preflight = _what_if(bicep, rg)
         if (validation.get("validated") and not required
+                and not secret_violations
                 and (preflight is None or preflight.get("ok"))):
             warnings = list(assumptions)
             warnings.extend("Unsupported: %s" % item for item in unsupported)
@@ -631,7 +779,8 @@ def _generic_azure_bicep(graph):
                 "unsupported": unsupported,
                 "generationAttempts": attempt + 1,
             }
-        if (validation.get("validated") and not required and preflight
+        if (validation.get("validated") and not required
+                and not secret_violations and preflight
                 and _preflight_environment_blocker(
                     preflight.get("output", ""))):
             warnings = list(assumptions)
@@ -646,7 +795,11 @@ def _generic_azure_bicep(graph):
                 "generationAttempts": attempt + 1,
                 "preflightBlocked": True,
             }
-        if required:
+        if secret_violations:
+            last_reason = (
+                "Hard-coded secret literals are forbidden: "
+                + "; ".join(secret_violations))
+        elif required:
             last_reason = (
                 "Required parameters have no defaults: " + ", ".join(required))
         elif preflight is not None:
@@ -790,15 +943,18 @@ def parse_sketch(sample_id=None, image_bytes=None, media_type="image/png"):
     if sample_id and sample_id in SKETCHES:
         return SKETCHES[sample_id]
     if image_bytes:
+        if _looks_like_svg(image_bytes):
+            media_type = SVG_MEDIA_TYPE
         if media_type == VSDX_MEDIA_TYPE:
             if not _azure_vision_configured():
                 raise RuntimeError("Azure AI model is not configured")
             return _azure_vsdx_parse(image_bytes)
+        if media_type == SVG_MEDIA_TYPE:
+            if not _azure_vision_configured():
+                raise RuntimeError("Azure AI model is not configured")
+            return _azure_svg_parse(image_bytes)
         if _azure_vision_configured():
-            try:
-                return _azure_vision_parse(image_bytes, media_type)
-            except Exception as e:  # never break the demo -- fall back to mock
-                print("[vision] Azure call failed, using mock: %s" % e)
+            return _azure_vision_parse(image_bytes, media_type)
         # MOCK: deterministic pick based on image hash so uploads feel "recognized".
         idx = int(hashlib.md5(image_bytes).hexdigest(), 16) % len(SKETCHES)
         return list(SKETCHES.values())[idx]
@@ -825,10 +981,10 @@ def _decode_agent_file(body):
         if not separator or ";base64" not in header:
             raise ValueError("imageBase64 data URL is invalid")
         media_type = header[5:].split(";", 1)[0]
-    if media_type not in AGENT_MEDIA_TYPES | {VSDX_MEDIA_TYPE}:
+    if media_type not in AGENT_MEDIA_TYPES | {VSDX_MEDIA_TYPE, SVG_MEDIA_TYPE}:
         raise ValueError(
-            "contentType must be image/jpeg, image/png, image/webp, or "
-            "application/vnd.ms-visio.drawing")
+            "contentType must be image/jpeg, image/png, image/webp, "
+            "image/svg+xml, or application/vnd.ms-visio.drawing")
     try:
         content = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError):
@@ -837,6 +993,8 @@ def _decode_agent_file(body):
         raise ValueError("diagram file is empty")
     if len(content) > AGENT_IMAGE_MAX_BYTES:
         raise ValueError("diagram file exceeds the configured size limit")
+    if _looks_like_svg(content):
+        media_type = SVG_MEDIA_TYPE
     return content, media_type
 
 
@@ -926,6 +1084,8 @@ def analyze_for_agent(body):
     content, media_type = _decode_agent_file(body)
     if media_type == VSDX_MEDIA_TYPE:
         graph = _validate_graph(_azure_vsdx_parse(content))
+    elif media_type == SVG_MEDIA_TYPE:
+        graph = _validate_graph(_azure_svg_parse(content))
     else:
         graph = _validate_graph(_azure_vision_parse(content, media_type))
     iac = generate_iac(graph)
