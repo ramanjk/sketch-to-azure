@@ -236,15 +236,29 @@ def _azure_vision_parse(image_bytes, media_type="image/png"):
         ],
         "temperature": 0,
         "response_format": {"type": "json_object"},
-        "max_tokens": 1500,
     }
     headers = {"Content-Type": "application/json", auth[0]: auth[1]}
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode("utf-8"), headers=headers)
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
-    content = body["choices"][0]["message"]["content"]
-    graph = json.loads(content)
+    graph = None
+    last_error = "model returned no JSON"
+    for max_tokens in (5000, 7000):
+        payload["max_tokens"] = max_tokens
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+        choice = body["choices"][0]
+        if choice.get("finish_reason") == "length":
+            last_error = "model response reached its output-token limit"
+            continue
+        content = choice["message"]["content"]
+        try:
+            graph = json.loads(content)
+            break
+        except json.JSONDecodeError as error:
+            last_error = "model returned invalid JSON: %s" % error
+    if graph is None:
+        raise RuntimeError(
+            "Azure vision parsing failed after retry: " + last_error)
     graph.setdefault("id", "sketch")
     graph.setdefault("name", "Parsed sketch")
     graph.setdefault("edges", [])
@@ -522,6 +536,11 @@ def _normalize_vision_graph(graph):
     for node in nodes:
         label = str(node.get("label", "")).lower()
         service = str(node.get("properties", {}).get("service", "")).lower()
+        if (node.get("type") == "azure"
+                and service == "kubernetes services"
+                and "fleet hub" not in label
+                and "microsoft-managed" not in label):
+            node["type"] = "aks"
         if node.get("type") == "privatedns" and "public" in label:
             node["type"] = "azure"
             node.setdefault("properties", {})["service"] = (
@@ -640,7 +659,7 @@ Requirements:
 """.strip()
 
 
-def _azure_json_completion(messages, max_tokens=7000):
+def _azure_json_completion(messages, max_tokens=14000):
     import urllib.request
 
     endpoint = os.environ["AZURE_OPENAI_ENDPOINT"].rstrip("/")
@@ -664,7 +683,13 @@ def _azure_json_completion(messages, max_tokens=7000):
         headers={"Content-Type": "application/json", auth[0]: auth[1]})
     with urllib.request.urlopen(request, timeout=180) as response:
         body = json.loads(response.read().decode("utf-8"))
-    return json.loads(body["choices"][0]["message"]["content"])
+    choice = body["choices"][0]
+    if choice.get("finish_reason") == "length":
+        raise RuntimeError("Azure AI response reached its output-token limit")
+    try:
+        return json.loads(choice["message"]["content"])
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Azure AI returned invalid JSON: %s" % error)
 
 
 def _validate_string_list(value, field):

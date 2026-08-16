@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import os
 import time
 import unittest
@@ -158,6 +159,25 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(
             counts, {"aks": 1, "k8sworkload": 3, "containerimage": 3})
 
+    def test_normalizes_regional_kubernetes_services_to_aks(self):
+        graph = {
+            "id": "multi-region-aks",
+            "name": "Azure Kubernetes Fleet",
+            "nodes": [
+                {"id": "region-a", "type": "azure",
+                 "label": "Kubernetes services",
+                 "properties": {"service": "Kubernetes services"}},
+                {"id": "fleet-hub", "type": "azure",
+                 "label": "Microsoft-managed Kubernetes services "
+                          "(Fleet hub cluster)",
+                 "properties": {"service": "Kubernetes services"}},
+            ],
+            "edges": [],
+        }
+        normalized = server._normalize_vision_graph(graph)
+        self.assertEqual(normalized["nodes"][0]["type"], "aks")
+        self.assertEqual(normalized["nodes"][1]["type"], "azure")
+
     def test_generic_azure_graph_uses_extensible_generator(self):
         with patch.object(
                 server, "_generic_azure_bicep",
@@ -255,6 +275,30 @@ class AgentApiTests(unittest.TestCase):
                 side_effect=RuntimeError("vision failed")):
             with self.assertRaisesRegex(RuntimeError, "vision failed"):
                 server.parse_sketch(image_bytes=b"invalid image")
+
+    def test_vision_parse_retries_truncated_json(self):
+        truncated = io.BytesIO(json.dumps({
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": '{"id":"incomplete'},
+            }],
+        }).encode())
+        complete = io.BytesIO(json.dumps({
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"content": json.dumps(GENERIC_GRAPH)},
+            }],
+        }).encode())
+        with patch.dict(
+                os.environ,
+                {"AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com"}), patch.object(
+                server, "_auth_header",
+                return_value=("api-key", "test")), patch(
+                "urllib.request.urlopen",
+                side_effect=[truncated, complete]) as urlopen:
+            graph = server._azure_vision_parse(b"image", "image/png")
+        self.assertEqual(graph, GENERIC_GRAPH)
+        self.assertEqual(urlopen.call_count, 2)
 
     def test_extracts_visio_shapes_and_connectors(self):
         structure = server._extract_vsdx_structure(vsdx_bytes())
