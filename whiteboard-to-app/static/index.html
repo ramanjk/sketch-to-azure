@@ -83,7 +83,8 @@
   <div id="graphCard" class="card hide">
     <h3>Parsed architecture · <span id="gName"></span></h3>
     <div class="graph" id="graph"></div>
-    <button style="margin-top:14px" onclick="generate()">Generate IaC + manifests →</button>
+    <button id="generateBtn" style="margin-top:14px" onclick="generate()">Generate IaC + manifests →</button>
+    <div id="generateStatus" class="note" style="margin-top:10px"></div>
   </div>
 
   <div class="row" id="iacRow">
@@ -144,39 +145,67 @@ function renderGraph(){
   document.getElementById('bicepCard').classList.add('hide');
   document.getElementById('k8sCard').classList.add('hide');
   document.getElementById('deployCard').classList.add('hide');
+  document.getElementById('generateStatus').textContent='';
 }
 async function generate(){
-  const r=await fetch('/api/generate',{method:'POST',body:JSON.stringify(graph)});const iac=await r.json();
-  if(!r.ok){throw new Error(iac.error||'IaC generation failed');}
-  window._kind=iac.kind;
-  window._k8s=iac.k8s||'';
-  window._requiresParameters=!!iac.requiresParameters;
-  document.getElementById('bicep').textContent=iac.bicep;
-  const actions=iac.manualActions||[];
-  document.getElementById('bicepNote').textContent=actions.length
-    ?'Pre-deployment actions:\n'+actions.map((item,index)=>`${index+1}. ${item}`).join('\n')
-    :'No manual pre-deployment actions reported.';
-  document.getElementById('bicepCard').classList.remove('hide');
-  const isAzure=iac.kind==='azure-infra';
-  document.getElementById('bicepTitle').textContent=isAzure?'Azure infrastructure (Bicep)':'Azure infra (Bicep)';
-  if(iac.k8s){
-    const deployments=(iac.k8s.match(/^kind: Deployment$/gm)||[]).length;
-    const services=(iac.k8s.match(/^kind: Service$/gm)||[]).length;
-    document.getElementById('k8sTitle').textContent=
-      `Kubernetes manifests · ${deployments} Deployments · ${services} Services`;
-    document.getElementById('k8s').textContent=iac.k8s;
-    document.getElementById('k8sNote').textContent=(iac.warnings||[]).join('\n');
-    document.getElementById('k8sCard').classList.remove('hide');
-  }else{
-    document.getElementById('k8sCard').classList.add('hide');
+  const button=document.getElementById('generateBtn');
+  const status=document.getElementById('generateStatus');
+  const started=Date.now();
+  button.disabled=true;
+  const updateStatus=()=>{
+    const elapsed=Math.floor((Date.now()-started)/1000);
+    status.innerHTML=`<span class="spin"></span> Generating and validating IaC… ${elapsed}s. Complex diagrams can take up to 3 minutes.`;
+  };
+  updateStatus();
+  const timer=setInterval(updateStatus,1000);
+  try{
+    const r=await fetch('/api/generate',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(graph)
+    });
+    const contentType=r.headers.get('content-type')||'';
+    const iac=contentType.includes('application/json')
+      ?await r.json()
+      :{error:(await r.text()).slice(0,500)};
+    if(!r.ok)throw new Error(iac.error||`IaC generation failed (HTTP ${r.status})`);
+    if(!iac.bicep)throw new Error('Generation completed without Bicep output');
+    window._kind=iac.kind;
+    window._k8s=iac.k8s||'';
+    window._requiresParameters=!!iac.requiresParameters;
+    document.getElementById('bicep').textContent=iac.bicep;
+    const actions=iac.manualActions||[];
+    document.getElementById('bicepNote').textContent=actions.length
+      ?'Pre-deployment actions:\n'+actions.map((item,index)=>`${index+1}. ${item}`).join('\n')
+      :'No manual pre-deployment actions reported.';
+    document.getElementById('bicepCard').classList.remove('hide');
+    const isAzure=iac.kind==='azure-infra';
+    document.getElementById('bicepTitle').textContent=isAzure?'Azure infrastructure (Bicep)':'Azure infra (Bicep)';
+    if(iac.k8s){
+      const deployments=(iac.k8s.match(/^kind: Deployment$/gm)||[]).length;
+      const services=(iac.k8s.match(/^kind: Service$/gm)||[]).length;
+      document.getElementById('k8sTitle').textContent=
+        `Kubernetes manifests · ${deployments} Deployments · ${services} Services`;
+      document.getElementById('k8s').textContent=iac.k8s;
+      document.getElementById('k8sNote').textContent=(iac.warnings||[]).join('\n');
+      document.getElementById('k8sCard').classList.remove('hide');
+    }else{
+      document.getElementById('k8sCard').classList.add('hide');
+    }
+    document.getElementById('deployBtn').disabled=window._requiresParameters;
+    document.getElementById('deployBtn').textContent=window._requiresParameters
+      ?'⚠ Provide required inputs before deploy'
+      :isAzure?'🧪 Validate & deploy (bicep build)'
+      :'🚀 Deploy to sandbox';
+    document.getElementById('deployCard').classList.remove('hide');
+    status.textContent=`IaC generated and validated in ${Math.floor((Date.now()-started)/1000)}s.`;
+    on('s3');
+  }catch(error){
+    status.textContent=`Generation failed: ${error.message}. Please retry; no Azure resources were deployed.`;
+  }finally{
+    clearInterval(timer);
+    button.disabled=false;
   }
-  document.getElementById('deployBtn').disabled=window._requiresParameters;
-  document.getElementById('deployBtn').textContent=window._requiresParameters
-    ?'⚠ Provide required inputs before deploy'
-    :isAzure?'🧪 Validate & deploy (bicep build)'
-    :'🚀 Deploy to sandbox';
-  document.getElementById('deployCard').classList.remove('hide');
-  on('s3');
 }
 async function copyK8s(){
   if(!window._k8s)return;

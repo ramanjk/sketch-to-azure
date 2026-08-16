@@ -1923,8 +1923,16 @@ class Handler(BaseHTTPRequestHandler):
             except RuntimeError as e:
                 return self._json_error(503, str(e))
         if u.path == "/api/generate":
-            graph = json.loads(raw or b"{}")
-            return self._send(200, json.dumps(generate_iac(graph)))
+            try:
+                graph = self._read_json(raw)
+                return self._send(200, json.dumps(generate_iac(graph)))
+            except ValueError as e:
+                return self._json_error(400, str(e))
+            except RuntimeError as e:
+                return self._json_error(503, str(e))
+            except Exception as e:
+                print("[generate] request failed: %s" % e)
+                return self._json_error(500, "IaC generation failed")
         if u.path == "/api/deploy":
             graph = json.loads(raw or b"{}")
             return self._send(200, json.dumps(deploy(graph)))

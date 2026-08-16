@@ -624,6 +624,9 @@ class AgentApiTests(unittest.TestCase):
         self.assertIn("Download YAML", html)
         self.assertIn("Pre-deployment actions:", html)
         self.assertIn("Provide required inputs before deploy", html)
+        self.assertIn("Complex diagrams can take up to 3 minutes", html)
+        self.assertIn("Generation failed:", html)
+        self.assertIn("button.disabled=true", html)
         self.assertNotIn(
             "if(isAzure){\n    document.getElementById('k8sCard')"
             ".classList.add('hide')",
