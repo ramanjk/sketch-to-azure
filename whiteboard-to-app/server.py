@@ -597,8 +597,11 @@ Requirements:
 - A required generated administrator password may use an `@secure()` parameter
   whose default is `newGuid()`. Never place a string literal in a password,
   secret, token, or credential property.
-- Every parameter must have a safe default so unattended Azure what-if can
-  run. Derive globally unique resource-name defaults with uniqueString().
+- Give parameters safe defaults when the value can be derived responsibly.
+  Environment-specific values that cannot be derived, such as a supported
+  service version or resource-provider object ID, may remain required. Never
+  invent defaults merely to make unattended Azure what-if run.
+  Derive globally unique resource-name defaults with uniqueString().
   Prefer managed identity and resource references over connection-string or
   credential parameters.
 - Prefer managed identity and RBAC-ready configuration.
@@ -721,6 +724,16 @@ def _bicep_secret_violations(bicep):
     ][:20]
 
 
+def _required_parameter_violations(details):
+    sensitive = re.compile(
+        r"(?:password|secret|token|credential)", re.IGNORECASE)
+    return [
+        item["name"] for item in details
+        if sensitive.search(item["name"])
+        and item.get("type", "").lower() not in {"securestring", "secureobject"}
+    ]
+
+
 def _generic_azure_bicep(graph):
     if not _azure_vision_configured():
         raise RuntimeError(
@@ -760,7 +773,13 @@ def _generic_azure_bicep(graph):
             "Generation limitation: %s" % item for item in limitations)
         validation = validate_bicep(bicep)
         required = validation.get("required_parameters", [])
+        required_details = validation.get("required_parameter_details", [])
         secret_violations = _bicep_secret_violations(bicep)
+        unsafe_required = _required_parameter_violations(required_details)
+        if unsafe_required:
+            secret_violations.extend(
+                "required parameter %s is not @secure" % name
+                for name in unsafe_required)
         preflight = None
         if validation.get("validated") and not required and not secret_violations:
             rg = os.environ.get("DEPLOY_RG")
@@ -794,6 +813,22 @@ def _generic_azure_bicep(graph):
                 "unsupported": unsupported,
                 "generationAttempts": attempt + 1,
                 "preflightBlocked": True,
+            }
+        if validation.get("validated") and required and not secret_violations:
+            warnings = list(assumptions)
+            warnings.extend("Unsupported: %s" % item for item in unsupported)
+            warnings.append(
+                "Deployment inputs required before Azure preview: "
+                + ", ".join(required))
+            return {
+                "bicep": bicep.strip(),
+                "k8s": "",
+                "kind": "azure-infra",
+                "warnings": warnings,
+                "unsupported": unsupported,
+                "generationAttempts": attempt + 1,
+                "requiresParameters": True,
+                "requiredParameters": required,
             }
         if secret_violations:
             last_reason = (
@@ -1122,7 +1157,15 @@ def preview_agent_plan(body):
     validation = validate_bicep(iac.get("bicep", ""))
     result = {"validation": validation}
     rg = os.environ.get("DEPLOY_RG")
-    if validation.get("validated") and rg:
+    required = validation.get("required_parameters", [])
+    if required:
+        result["whatIf"] = {
+            "ok": False,
+            "output": (
+                "Azure preview requires parameter values: "
+                + ", ".join(required)),
+        }
+    elif validation.get("validated") and rg:
         result["whatIf"] = _what_if(iac["bicep"], rg)
     else:
         result["whatIf"] = {
@@ -1466,6 +1509,45 @@ def _compiler_diagnostics(stderr):
     return "\n".join(errors or lines)[:6000]
 
 
+def _arm_semantic_violations(arm):
+    violations = []
+    for resource in arm.get("resources", []):
+        if resource.get("type", "").lower() != (
+                "microsoft.redhatopenshift/openshiftclusters"):
+            continue
+        properties = resource.get("properties", {})
+        cluster = properties.get("clusterProfile", {})
+        master = properties.get("masterProfile", {})
+        workers = properties.get("workerProfiles", [])
+        service_principal = properties.get("servicePrincipalProfile", {})
+        required = [
+            ("clusterProfile.version", cluster.get("version")),
+            ("clusterProfile.resourceGroupId", cluster.get("resourceGroupId")),
+            ("clusterProfile.pullSecret", cluster.get("pullSecret")),
+            ("masterProfile.subnetId", master.get("subnetId")),
+            ("masterProfile.vmSize", master.get("vmSize")),
+            ("servicePrincipalProfile.clientId",
+             service_principal.get("clientId")),
+            ("servicePrincipalProfile.clientSecret",
+             service_principal.get("clientSecret")),
+        ]
+        violations.extend(
+            "ARO %s is required" % name
+            for name, value in required if value in (None, ""))
+        if cluster.get("resourceGroupId") == "[resourceGroup().id]":
+            violations.append(
+                "ARO clusterProfile.resourceGroupId must be a distinct "
+                "managed resource group")
+        if not isinstance(workers, list) or not workers:
+            violations.append("ARO workerProfiles requires at least one pool")
+        else:
+            for field in ("name", "count", "diskSizeGB", "vmSize", "subnetId"):
+                if workers[0].get(field) in (None, ""):
+                    violations.append(
+                        "ARO workerProfiles[0].%s is required" % field)
+    return violations
+
+
 def validate_bicep(bicep_text):
     if not bicep_text.strip():
         return {"validated": False, "reason": "no bicep to validate"}
@@ -1478,14 +1560,28 @@ def validate_bicep(bicep_text):
         os.unlink(path)
         if out.returncode == 0:
             arm = json.loads(out.stdout)
+            semantic_violations = _arm_semantic_violations(arm)
+            if semantic_violations:
+                return {
+                    "validated": False,
+                    "reason": "; ".join(semantic_violations),
+                }
             n = len(arm.get("resources", []))
             required = [
                 name for name, definition in arm.get("parameters", {}).items()
                 if "defaultValue" not in definition
             ]
+            required_details = [
+                {
+                    "name": name,
+                    "type": arm["parameters"][name].get("type", ""),
+                }
+                for name in required
+            ]
             return {"validated": True, "arm_resources": n,
                     "arm_bytes": len(out.stdout),
-                    "required_parameters": required}
+                    "required_parameters": required,
+                    "required_parameter_details": required_details}
         return {"validated": False,
                 "reason": _compiler_diagnostics(out.stderr)}
     except FileNotFoundError:

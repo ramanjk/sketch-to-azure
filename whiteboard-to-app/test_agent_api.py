@@ -343,6 +343,34 @@ class AgentApiTests(unittest.TestCase):
             diagnostics,
             "file.bicep(8,2) : Error BCP123: actionable failure")
 
+    def test_aro_semantic_validation_requires_cluster_profiles(self):
+        arm = {
+            "resources": [{
+                "type": "Microsoft.RedHatOpenShift/openShiftClusters",
+                "properties": {
+                    "clusterProfile": {
+                        "pullSecret": "[parameters('aroPullSecret')]",
+                        "resourceGroupId": "[resourceGroup().id]",
+                    },
+                    "masterProfile": {"subnetId": "master"},
+                    "workerProfiles": [{"name": "worker"}],
+                    "servicePrincipalProfile": {
+                        "clientId": "[parameters('aroClientId')]",
+                        "clientSecret": "[parameters('aroClientSecret')]",
+                    },
+                },
+            }],
+        }
+        violations = server._arm_semantic_violations(arm)
+        self.assertIn("ARO clusterProfile.version is required", violations)
+        self.assertIn("ARO masterProfile.vmSize is required", violations)
+        self.assertIn(
+            "ARO workerProfiles[0].diskSizeGB is required", violations)
+        self.assertIn(
+            "ARO clusterProfile.resourceGroupId must be a distinct "
+            "managed resource group",
+            violations)
+
     def test_generated_bicep_removes_multiline_trailing_commas(self):
         source = "var items = [\n  {\n    name: 'one',\n  },\n]\n"
         self.assertEqual(
@@ -382,6 +410,54 @@ class AgentApiTests(unittest.TestCase):
                 return_value={"ok": True, "output": "preview"}):
             result = server._generic_azure_bicep(GENERIC_GRAPH)
         self.assertEqual(result["generationAttempts"], 2)
+
+    def test_generic_generation_returns_required_parameters(self):
+        generated = {
+            "bicep": (
+                "@secure()\n"
+                "param pullSecret string\n"
+                "param aroVersion string\n"
+                "resource identity 'Microsoft.ManagedIdentity/"
+                "userAssignedIdentities@2023-01-31' = {\n"
+                "  name: 'aro-id'\n"
+                "  location: resourceGroup().location\n"
+                "}"
+            ),
+            "assumptions": [],
+            "unsupported": [],
+        }
+        validation = {
+            "validated": True,
+            "required_parameters": ["pullSecret", "aroVersion"],
+            "required_parameter_details": [
+                {"name": "pullSecret", "type": "secureString"},
+                {"name": "aroVersion", "type": "string"},
+            ],
+        }
+        with patch.object(
+                server, "_azure_vision_configured",
+                return_value=True), patch.object(
+                server, "_azure_json_completion",
+                return_value=generated), patch.object(
+                server, "validate_bicep",
+                return_value=validation):
+            result = server._generic_azure_bicep(GENERIC_GRAPH)
+        self.assertTrue(result["requiresParameters"])
+        self.assertEqual(
+            result["requiredParameters"], ["pullSecret", "aroVersion"])
+
+    def test_preview_does_not_run_without_required_parameters(self):
+        token = server._create_plan_token(GRAPH, SIGNED_IAC)
+        with patch.object(
+                server, "validate_bicep",
+                return_value={
+                    "validated": True,
+                    "required_parameters": ["aroVersion"],
+                }), patch.object(server, "_what_if") as what_if:
+            result = server.preview_agent_plan({"planToken": token})
+        self.assertFalse(result["whatIf"]["ok"])
+        self.assertIn("aroVersion", result["whatIf"]["output"])
+        what_if.assert_not_called()
 
     def test_generic_generation_reports_environment_blocker(self):
         generated = {
