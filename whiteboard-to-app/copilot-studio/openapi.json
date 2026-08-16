@@ -153,8 +153,8 @@
       "properties": {
         "imageBase64": {
           "type": "string",
-          "description": "Base64-encoded image content. A base64 data URL is also accepted.",
-          "x-ms-summary": "Architecture diagram"
+            "description": "Base64-encoded architecture image or VSDX file. A base64 image data URL is also accepted.",
+            "x-ms-summary": "Architecture diagram file"
         },
         "contentType": {
           "type": "string",
@@ -162,7 +162,8 @@
           "enum": [
             "image/jpeg",
             "image/png",
-            "image/webp"
+            "image/webp",
+            "application/vnd.ms-visio.drawing"
           ],
           "x-ms-summary": "Image type"
         }

@@ -74,8 +74,8 @@
   <div class="card">
     <h3>Start from a sketch</h3>
     <div class="samples" id="samples"></div>
-    <div style="margin-top:12px;color:var(--dim)">…or upload a photo of your own whiteboard:
-      <input type="file" id="file" accept="image/*" onchange="uploadImg()"/>
+    <div style="margin-top:12px;color:var(--dim)">…or upload an architecture image or Visio file:
+      <input type="file" id="file" accept="image/*,.vsdx,application/vnd.ms-visio.drawing" onchange="uploadImg()"/>
       <span class="tag" id="visionBadge">(checking vision…)</span>
     </div>
   </div>
@@ -122,7 +122,12 @@ async function pick(id){
 async function uploadImg(){
   const f=document.getElementById('file').files[0];if(!f)return;
   const buf=await f.arrayBuffer();
-  const r=await fetch('/api/parse-image',{method:'POST',body:buf});graph=await r.json();renderGraph();
+  const isVsdx=f.name.toLowerCase().endsWith('.vsdx');
+  const contentType=isVsdx?'application/vnd.ms-visio.drawing':(f.type||'image/png');
+  const r=await fetch('/api/parse-image',{method:'POST',headers:{'Content-Type':contentType},body:buf});
+  graph=await r.json();
+  if(!r.ok){alert(graph.error||'Diagram analysis failed');return;}
+  renderGraph();
 }
 function renderGraph(){
   on('s1');on('s2');

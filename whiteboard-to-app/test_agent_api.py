@@ -1,7 +1,9 @@
 import base64
+import io
 import os
 import time
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -58,6 +60,35 @@ SIGNED_IAC = {
     "warnings": ["Signed warning"],
     "unsupported": [],
 }
+
+
+def vsdx_bytes(unsafe=False):
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        if unsafe:
+            archive.writestr("../unsafe.xml", "<x/>")
+        archive.writestr(
+            "visio/pages/pages.xml",
+            '<Pages xmlns="http://schemas.microsoft.com/office/visio/2012/main"/>')
+        archive.writestr(
+            "visio/pages/page1.xml",
+            """<PageContents xmlns="http://schemas.microsoft.com/office/visio/2012/main">
+              <Shapes>
+                <Shape ID="1" NameU="Azure Functions">
+                  <Cell N="PinX" V="2"/><Cell N="PinY" V="3"/>
+                  <Cell N="Width" V="1"/><Cell N="Height" V="1"/>
+                  <Text>Orders Function</Text>
+                </Shape>
+                <Shape ID="2" NameU="Cosmos DB">
+                  <Cell N="PinX" V="5"/><Cell N="PinY" V="3"/>
+                  <Text>Orders Database</Text>
+                </Shape>
+              </Shapes>
+              <Connects>
+                <Connect FromSheet="1" ToSheet="2" FromCell="EndX" ToCell="PinX"/>
+              </Connects>
+            </PageContents>""")
+    return stream.getvalue()
 
 
 class AgentApiTests(unittest.TestCase):
@@ -123,6 +154,41 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(
             server._decode_agent_image(body), (b"png-data", "image/png"))
 
+    def test_decodes_visio_file(self):
+        content = vsdx_bytes()
+        body = {
+            "contentType": server.VSDX_MEDIA_TYPE,
+            "imageBase64": base64.b64encode(content).decode("ascii"),
+        }
+        self.assertEqual(
+            server._decode_agent_file(body),
+            (content, server.VSDX_MEDIA_TYPE))
+
+    def test_extracts_visio_shapes_and_connectors(self):
+        structure = server._extract_vsdx_structure(vsdx_bytes())
+        page = structure["pages"][0]
+        self.assertEqual(
+            [shape["text"] for shape in page["shapes"]],
+            ["Orders Function", "Orders Database"])
+        self.assertEqual(
+            page["connectors"][0]["from"], "1")
+        self.assertEqual(
+            page["connectors"][0]["to"], "2")
+
+    def test_rejects_unsafe_visio_package(self):
+        with self.assertRaisesRegex(ValueError, "unsafe path"):
+            server._extract_vsdx_structure(vsdx_bytes(unsafe=True))
+
+    def test_visio_parse_uses_structured_completion(self):
+        with patch.object(
+                server, "_azure_json_completion",
+                return_value=GENERIC_GRAPH) as completion:
+            graph = server._azure_vsdx_parse(vsdx_bytes())
+        self.assertEqual(graph, GENERIC_GRAPH)
+        prompt = completion.call_args.args[0][1]["content"]
+        self.assertIn("Orders Function", prompt)
+        self.assertIn('"from":"1"', prompt)
+
     def test_rejects_invalid_image_encoding(self):
         with self.assertRaisesRegex(ValueError, "valid base64"):
             server._decode_agent_image({
@@ -181,6 +247,40 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(result["generationAttempts"], 2)
         self.assertEqual(result["warnings"], ["Added a hosting plan"])
 
+    def test_compiler_diagnostics_prioritize_errors(self):
+        stderr = "\n".join(
+            ["file.bicep(1,1) : Warning sample"] * 100
+            + ["file.bicep(8,2) : Error BCP123: actionable failure"]
+        )
+        diagnostics = server._compiler_diagnostics(stderr)
+        self.assertEqual(
+            diagnostics,
+            "file.bicep(8,2) : Error BCP123: actionable failure")
+
+    def test_generated_bicep_removes_multiline_trailing_commas(self):
+        source = "var items = [\n  {\n    name: 'one',\n  },\n]\n"
+        self.assertEqual(
+            server._normalize_generated_bicep(source),
+            "var items = [\n  {\n    name: 'one'\n  }\n]")
+
+    def test_generic_generation_retries_timeout(self):
+        generated = {
+            "bicep": SIGNED_IAC["bicep"],
+            "assumptions": [],
+            "unsupported": [],
+        }
+        with patch.object(
+                server, "_azure_vision_configured",
+                return_value=True), patch.object(
+                server, "_azure_json_completion",
+                side_effect=[TimeoutError(), generated]), patch.object(
+                server, "validate_bicep",
+                return_value={"validated": True}), patch.object(
+                server, "_what_if",
+                return_value={"ok": True, "output": "preview"}):
+            result = server._generic_azure_bicep(GENERIC_GRAPH)
+        self.assertEqual(result["generationAttempts"], 2)
+
     def test_generic_generation_reports_environment_blocker(self):
         generated = {
             "bicep": SIGNED_IAC["bicep"],
@@ -202,6 +302,10 @@ class AgentApiTests(unittest.TestCase):
             result = server._generic_azure_bicep(GENERIC_GRAPH)
         self.assertTrue(result["preflightBlocked"])
         self.assertIn("environment blocker", result["warnings"][-1])
+
+    def test_sku_capacity_is_an_environment_blocker(self):
+        self.assertTrue(server._preflight_environment_blocker(
+            "SkuNotAvailable - failed for Capacity Restrictions"))
 
     def test_generic_generation_returns_compile_valid_plan_when_preflight_remains_invalid(self):
         generated = {

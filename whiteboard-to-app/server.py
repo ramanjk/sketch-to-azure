@@ -18,6 +18,9 @@ import base64
 import binascii
 import ipaddress
 import re
+import io
+import zipfile
+import xml.etree.ElementTree as ET
 import subprocess
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,6 +35,7 @@ AGENT_IMAGE_MAX_BYTES = int(
     os.environ.get("AGENT_IMAGE_MAX_BYTES", str(10 * 1024 * 1024)))
 AGENT_PLAN_TTL_SECONDS = int(os.environ.get("AGENT_PLAN_TTL_SECONDS", "86400"))
 AGENT_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp"}
+VSDX_MEDIA_TYPE = "application/vnd.ms-visio.drawing"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
 with open(os.path.join(HERE, "sketches.json"), encoding="utf-8") as f:
@@ -195,6 +199,134 @@ def _azure_vision_parse(image_bytes, media_type="image/png"):
     return _normalize_vision_graph(graph)
 
 
+def _vsdx_text(element, namespace):
+    values = []
+    for text in element.findall(".//v:Text", namespace):
+        value = " ".join("".join(text.itertext()).split())
+        if value and value not in values:
+            values.append(value)
+    return " | ".join(values)[:500]
+
+
+def _parse_vsdx_xml(content):
+    upper = content[:4096].upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ValueError("VSDX XML declarations are not allowed")
+    try:
+        return ET.fromstring(content)
+    except ET.ParseError:
+        raise ValueError("VSDX package contains invalid XML")
+
+
+def _extract_vsdx_structure(vsdx_bytes):
+    namespace = {"v": "http://schemas.microsoft.com/office/visio/2012/main"}
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(vsdx_bytes))
+    except zipfile.BadZipFile:
+        raise ValueError("VSDX file is not a valid Visio package")
+    with archive:
+        members = archive.infolist()
+        if len(members) > 2500:
+            raise ValueError("VSDX package contains too many files")
+        total_size = 0
+        for member in members:
+            path = member.filename.replace("\\", "/")
+            if path.startswith("/") or ".." in path.split("/"):
+                raise ValueError("VSDX package contains an unsafe path")
+            if member.file_size > 15 * 1024 * 1024:
+                raise ValueError("VSDX package contains an oversized part")
+            total_size += member.file_size
+        if total_size > 60 * 1024 * 1024:
+            raise ValueError("VSDX package expands beyond the size limit")
+
+        names = set(archive.namelist())
+        if "visio/pages/pages.xml" not in names:
+            raise ValueError("VSDX package has no Visio pages")
+        masters = {}
+        if "visio/masters/masters.xml" in names:
+            root = _parse_vsdx_xml(
+                archive.read("visio/masters/masters.xml"))
+            masters = {
+                item.get("ID"): item.get("NameU") or item.get("Name") or ""
+                for item in root.findall(".//v:Master", namespace)
+            }
+
+        page_paths = sorted(
+            name for name in names
+            if re.fullmatch(r"visio/pages/page\d+\.xml", name))
+        pages = []
+        shape_count = 0
+        for page_path in page_paths:
+            root = _parse_vsdx_xml(archive.read(page_path))
+            page_shapes = []
+            for shape in root.findall("./v:Shapes/v:Shape", namespace):
+                descendant_masters = {
+                    masters.get(item.get("Master"), "")
+                    for item in shape.findall(".//v:Shape", namespace)
+                    if item.get("Master")
+                }
+                if shape.get("Master"):
+                    descendant_masters.add(
+                        masters.get(shape.get("Master"), ""))
+                cells = {
+                    cell.get("N"): cell.get("V")
+                    for cell in shape.findall("v:Cell", namespace)
+                }
+                text = _vsdx_text(shape, namespace)
+                master_names = sorted(name for name in descendant_masters if name)
+                if not text and not master_names:
+                    continue
+                page_shapes.append({
+                    "id": shape.get("ID"),
+                    "name": shape.get("NameU") or shape.get("Name") or "",
+                    "masters": master_names[:12],
+                    "text": text,
+                    "x": cells.get("PinX"),
+                    "y": cells.get("PinY"),
+                    "width": cells.get("Width"),
+                    "height": cells.get("Height"),
+                })
+                shape_count += 1
+                if shape_count > 400:
+                    raise ValueError("VSDX diagram contains too many shapes")
+            connects = [
+                {
+                    "from": item.get("FromSheet"),
+                    "to": item.get("ToSheet"),
+                    "fromCell": item.get("FromCell"),
+                    "toCell": item.get("ToCell"),
+                }
+                for item in root.findall(".//v:Connect", namespace)
+            ]
+            if page_shapes:
+                pages.append({
+                    "page": page_path.rsplit("/", 1)[-1],
+                    "shapes": page_shapes,
+                    "connectors": connects[:500],
+                })
+    if not pages:
+        raise ValueError("VSDX diagram contains no readable shapes")
+    return {"format": "Microsoft Visio VSDX", "pages": pages}
+
+
+def _azure_vsdx_parse(vsdx_bytes):
+    structure = _extract_vsdx_structure(vsdx_bytes)
+    result = _azure_json_completion([
+        {"role": "system", "content": VISION_SYSTEM},
+        {"role": "user", "content": (
+            "Parse this structured extraction from a Microsoft Visio "
+            "architecture diagram. Shape coordinates describe layout; masters "
+            "identify icons; connectors describe glued relationships. Grouped "
+            "shape text is separated with ` | `. Return the architecture graph "
+            "using the required JSON shape.\n"
+            + json.dumps(structure, separators=(",", ":")))},
+    ], max_tokens=5000)
+    result.setdefault("id", "visio-architecture")
+    result.setdefault("name", "Visio architecture")
+    result.setdefault("edges", [])
+    return _normalize_vision_graph(result)
+
+
 def _semantic_role(node):
     value = ("%s %s" % (
         node.get("id", ""), node.get("label", ""))).lower()
@@ -272,10 +404,21 @@ Requirements:
   practical.
 - Emit one distinct resource for every deployable graph node. Do not merge
   repeated instances. Do not deploy frontend/user/admin actor nodes.
+- Keep large topologies concise, but prefer explicit resource declarations
+  when repeated instances have different parents or networking references.
 - Preserve graph edges as resource references, networking, bindings, backend
   pools, application settings, or outputs where the Azure resource model
   permits.
 - Preserve visible CIDRs, public/internal access, SKUs, and containment.
+- Declare every supporting resource referenced by another resource. For
+  example, every VM must reference a NIC resource declared in the template.
+- For load balancers, put `publicIPAddress`, `subnet`, and
+  `privateIPAllocationMethod` inside each frontend configuration's
+  `properties` object; put `sku` on the load balancer or public IP resource,
+  never inside `properties`. A public frontend references only a public IP;
+  an internal frontend references only a subnet and private IP allocation.
+- Model Traffic Manager with
+  `Microsoft.Network/trafficManagerProfiles`, not a `trafficManagers` type.
 - Use parameters for location and environment-specific values. Never emit a
   credential, token, connection string, or secret literal.
 - Never output secrets or values from listKeys/listConnectionStrings.
@@ -288,6 +431,10 @@ Requirements:
   each addition in assumptions.
 - If a graph node cannot be represented safely, list it in unsupported rather
   than substituting a different Azure service.
+- Site Recovery labels represent replication intent, not extra load balancers
+  or vaults by themselves. Mark them unsupported unless the graph contains
+  enough recovery-fabric, protection-container, policy, and protected-item
+  details to configure Azure Site Recovery correctly.
 - unsupported may contain only detected graph nodes. Missing optional features
   such as RBAC role assignments belong in assumptions, not unsupported.
 - Frontend/user/admin nodes are expected non-deployable actors; omit them from
@@ -343,6 +490,7 @@ def _preflight_environment_blocker(output):
         "missingsubscriptionregistration",
         "noregisteredproviderfound",
         "locationnotavailableforresourcetype",
+        "skunotavailable", "capacity restrictions",
     )
     return any(marker in value for marker in markers)
 
@@ -379,6 +527,10 @@ def _partition_unsupported(graph, values):
     return unsupported, limitations
 
 
+def _normalize_generated_bicep(bicep):
+    return re.sub(r",([ \t]*(?://[^\n]*)?\n)", r"\1", bicep).strip()
+
+
 def _generic_azure_bicep(graph):
     if not _azure_vision_configured():
         raise RuntimeError(
@@ -395,10 +547,19 @@ def _generic_azure_bicep(graph):
         raise RuntimeError("GENERIC_IAC_MAX_ATTEMPTS must be between 1 and 5")
     best = None
     for attempt in range(max_attempts):
-        result = _azure_json_completion(messages)
+        try:
+            result = _azure_json_completion(messages)
+        except TimeoutError:
+            last_reason = "Azure AI generation timed out"
+            messages.append({"role": "user", "content": (
+                "The previous generation timed out. Return a concise template "
+                "with minimal comments and assumptions while preserving every "
+                "graph node.")})
+            continue
         bicep = result.get("bicep")
         if not isinstance(bicep, str) or not bicep.strip():
             raise ValueError("generic generation returned no Bicep")
+        bicep = _normalize_generated_bicep(bicep)
         assumptions = _validate_string_list(
             result.get("assumptions", []), "assumptions")
         unsupported = _validate_string_list(
@@ -580,13 +741,17 @@ def _validate_graph(graph):
     }
 
 
-def parse_sketch(sample_id=None, image_bytes=None):
+def parse_sketch(sample_id=None, image_bytes=None, media_type="image/png"):
     if sample_id and sample_id in SKETCHES:
         return SKETCHES[sample_id]
     if image_bytes:
+        if media_type == VSDX_MEDIA_TYPE:
+            if not _azure_vision_configured():
+                raise RuntimeError("Azure AI model is not configured")
+            return _azure_vsdx_parse(image_bytes)
         if _azure_vision_configured():
             try:
-                return _azure_vision_parse(image_bytes)
+                return _azure_vision_parse(image_bytes, media_type)
             except Exception as e:  # never break the demo -- fall back to mock
                 print("[vision] Azure call failed, using mock: %s" % e)
         # MOCK: deterministic pick based on image hash so uploads feel "recognized".
@@ -605,27 +770,33 @@ def _agent_authorized(headers):
     return bool(secret and supplied and hmac.compare_digest(secret, supplied))
 
 
-def _decode_agent_image(body):
+def _decode_agent_file(body):
     encoded = body.get("imageBase64")
     media_type = body.get("contentType")
     if not isinstance(encoded, str) or not encoded:
-        raise ValueError("imageBase64 is required")
+        raise ValueError("imageBase64 containing the diagram file is required")
     if encoded.startswith("data:"):
         header, separator, encoded = encoded.partition(",")
         if not separator or ";base64" not in header:
             raise ValueError("imageBase64 data URL is invalid")
         media_type = header[5:].split(";", 1)[0]
-    if media_type not in AGENT_MEDIA_TYPES:
-        raise ValueError("contentType must be image/jpeg, image/png, or image/webp")
+    if media_type not in AGENT_MEDIA_TYPES | {VSDX_MEDIA_TYPE}:
+        raise ValueError(
+            "contentType must be image/jpeg, image/png, image/webp, or "
+            "application/vnd.ms-visio.drawing")
     try:
-        image = base64.b64decode(encoded, validate=True)
+        content = base64.b64decode(encoded, validate=True)
     except (binascii.Error, ValueError):
         raise ValueError("imageBase64 is not valid base64")
-    if not image:
-        raise ValueError("image is empty")
-    if len(image) > AGENT_IMAGE_MAX_BYTES:
-        raise ValueError("image exceeds the configured size limit")
-    return image, media_type
+    if not content:
+        raise ValueError("diagram file is empty")
+    if len(content) > AGENT_IMAGE_MAX_BYTES:
+        raise ValueError("diagram file exceeds the configured size limit")
+    return content, media_type
+
+
+def _decode_agent_image(body):
+    return _decode_agent_file(body)
 
 
 def _plan_signing_key():
@@ -707,8 +878,11 @@ def _verify_plan_token(token):
 def analyze_for_agent(body):
     if not _azure_vision_configured():
         raise RuntimeError("Azure vision model is not configured")
-    image, media_type = _decode_agent_image(body)
-    graph = _validate_graph(_azure_vision_parse(image, media_type))
+    content, media_type = _decode_agent_file(body)
+    if media_type == VSDX_MEDIA_TYPE:
+        graph = _validate_graph(_azure_vsdx_parse(content))
+    else:
+        graph = _validate_graph(_azure_vision_parse(content, media_type))
     iac = generate_iac(graph)
     validation = validate_bicep(iac.get("bicep", ""))
     warnings = azure_iac.topology_warnings(graph)
@@ -1080,6 +1254,12 @@ def generate_iac(graph):
 # CLI. This is a REAL check (not a mock): if it returns ok, the template is
 # valid ARM. Used by the deploy step as proof before any actual provisioning.
 # ---------------------------------------------------------------------------
+def _compiler_diagnostics(stderr):
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    errors = [line for line in lines if ": Error " in line]
+    return "\n".join(errors or lines)[:6000]
+
+
 def validate_bicep(bicep_text):
     if not bicep_text.strip():
         return {"validated": False, "reason": "no bicep to validate"}
@@ -1100,7 +1280,8 @@ def validate_bicep(bicep_text):
             return {"validated": True, "arm_resources": n,
                     "arm_bytes": len(out.stdout),
                     "required_parameters": required}
-        return {"validated": False, "reason": out.stderr.strip()[:3000]}
+        return {"validated": False,
+                "reason": _compiler_diagnostics(out.stderr)}
     except FileNotFoundError:
         return {"validated": False, "reason": "bicep CLI not found"}
     except Exception as e:
@@ -1188,8 +1369,11 @@ def _what_if(bicep_text, rg):
              "--template-file", path, "--no-pretty-print"],
             capture_output=True, text=True, timeout=300)
         os.unlink(path)
+        output = out.stdout or out.stderr
+        if out.returncode != 0:
+            output = output[-6000:]
         return {"ok": out.returncode == 0,
-                "output": (out.stdout or out.stderr)[:2000]}
+                "output": output[:6000]}
     except Exception as e:
         return {"ok": False, "output": str(e)[:400]}
 
@@ -1276,8 +1460,16 @@ class Handler(BaseHTTPRequestHandler):
         if u.path.startswith("/api/agent/"):
             return self._handle_agent_post(u.path, raw)
         if u.path == "/api/parse-image":
-            g = parse_sketch(image_bytes=raw or b"x")
-            return self._send(200, json.dumps(g))
+            try:
+                media_type = self.headers.get(
+                    "Content-Type", "image/png").split(";", 1)[0].strip()
+                g = parse_sketch(
+                    image_bytes=raw or b"x", media_type=media_type)
+                return self._send(200, json.dumps(g))
+            except ValueError as e:
+                return self._json_error(400, str(e))
+            except RuntimeError as e:
+                return self._json_error(503, str(e))
         if u.path == "/api/generate":
             graph = json.loads(raw or b"{}")
             return self._send(200, json.dumps(generate_iac(graph)))

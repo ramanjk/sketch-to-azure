@@ -29,6 +29,11 @@ they take many minutes and cost money — wrong for a live demo. Verified
 end-to-end on a private-AKS diagram → 14 ARM resources compiled + 3 real
 resources created.
 
+The upload and agent APIs also accept Microsoft Visio `.vsdx` files. VSDX
+packages are parsed natively for page shapes, labels, Azure icon masters,
+coordinates, and connectors; no image preview or LibreOffice conversion is
+required.
+
 **Clean up between demos** (each run creates uniquely-named resources):
 ```bash
 ./cleanup-demo.sh      # removes id-wb-*, kv-wb-*, acrwb* from the demo RG

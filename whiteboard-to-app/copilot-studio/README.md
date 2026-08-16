@@ -44,7 +44,7 @@ Do not include `https://` or a path.
 3. Confirm the authentication type is **API key**, parameter label is
    `x-api-key`, parameter name is `x-api-key`, and location is **Header**.
 4. Create the connector, create a connection using `AGENT_API_KEY`, and test
-   `AnalyzeArchitectureDiagram` with a small PNG or JPEG encoded as base64.
+   `AnalyzeArchitectureDiagram` with a PNG, JPEG, or VSDX encoded as base64.
 5. Confirm the result includes `validation.validated`, `deploymentEligible`,
    and `planToken`.
 
