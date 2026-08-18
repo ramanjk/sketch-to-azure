@@ -1,0 +1,4 @@
+Analyzes uploaded Azure architecture diagrams, identifies services and
+connections, generates compile-validated Bicep and Kubernetes manifests,
+previews Azure changes, and submits eligible plans for human-approved
+deployment of a server-side allow-listed safe resource subset.
