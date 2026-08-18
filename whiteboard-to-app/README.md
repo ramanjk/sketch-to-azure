@@ -10,14 +10,62 @@ Hackathon scaffold. Pure Python **stdlib, zero dependencies**. Runs fully offlin
 with a deterministic mock, **or with LIVE GPT-4o vision + real Bicep validation**
 when Azure is configured.
 
-## Run
+## Setup and launch
+
+Clone the repository and enter the agent directory:
+
+```bash
+git clone https://github.com/ramanjk/sketch-to-azure.git
+cd sketch-to-azure/whiteboard-to-app
+```
+
+The app uses only the Python standard library, so there are no `pip`
+dependencies to install. Python 3 and a web browser are sufficient for offline
+mode. Live analysis and deployment also require the
+[Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli).
+
+### Offline mode (mock, no Azure account)
+
+```bash
+python3 server.py
+```
+
+Open <http://localhost:8012>. The UI badge shows 🟡 mock.
 
 ### Live mode (real GPT-4o vision + real Azure deploy)
+
+Authenticate with Azure and install the Bicep CLI:
+
 ```bash
-cd ~/hackathon/whiteboard-to-app
-./run-live.sh          # uses your az login; no secrets in the repo
-# open http://localhost:8012  -> badge shows 🟢 live
+az login
+az account set --subscription "<subscription-id>"
+az bicep install
 ```
+
+Create the local configuration file:
+
+```bash
+cp .env.example .env
+```
+
+Set at least these values in `.env`:
+
+```dotenv
+AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT=<vision-capable-deployment>
+AZURE_OPENAI_API_VERSION=<supported-api-version>
+```
+
+Then launch the app:
+
+```bash
+./run-live.sh
+```
+
+Open <http://localhost:8012>. The launcher reads `.env` automatically and uses
+either `AZURE_OPENAI_API_KEY` or the current `az login` session. The UI badge
+shows 🟢 live.
+
 Upload a photo of a real Azure architecture diagram → GPT-4o parses it into a
 graph → the generator emits a **compile-valid Bicep** template → the deploy step:
 1. runs `az bicep build` on the **full** template (proves all resources compile to ARM), and
@@ -39,18 +87,37 @@ required.
 ./cleanup-demo.sh      # removes id-wb-*, kv-wb-*, acrwb* from the demo RG
 ```
 
-Deploy behavior is controlled by env (set in `run-live.sh`):
+Deploy behavior is controlled by environment variables (set them in `.env`):
 - `DEPLOY_RG` — target RG for the real subset deploy (default `rg-whiteboard-demo`)
 - `DEPLOY_MODE=real` — provision the safe subset (default when `DEPLOY_RG` set)
 - `DEPLOY_MODE=whatif` — instead run `az deployment group what-if` on the full template
 - unset — validate only, no provisioning
 
-### Offline mode (mock, no cloud)
-```bash
-cd ~/hackathon/whiteboard-to-app
-python3 server.py      # badge shows 🟡 mock
-# open http://localhost:8012
+### Launch the hosted Copilot agent API
+
+To deploy the secured API used by the Microsoft 365 Copilot/Power Platform
+connector, add these values to `.env`:
+
+```dotenv
+AZURE_OPENAI_RESOURCE_GROUP=<resource-group-containing-the-model>
+AZURE_OPENAI_RESOURCE_NAME=<azure-openai-resource-name>
+AGENT_API_KEY=<random-32-byte-or-longer-secret>
+AGENT_PLAN_SIGNING_KEY=<different-random-secret>
 ```
+
+Load the configuration into the current shell and deploy:
+
+```bash
+set -a
+source .env
+set +a
+./deploy-container-app.sh
+```
+
+The script builds and deploys the Azure Container App, verifies its HTTPS
+endpoint, and prints the hostname to use in the connector. See
+[`copilot-studio/README.md`](copilot-studio/README.md) to import the connector
+and publish the agent.
 
 ## Demo flow (3 min)
 1. Click a sample sketch (or upload a whiteboard photo).
